@@ -3,6 +3,7 @@ package server
 import (
 	"log"
 	"net"
+	"strings"
 
 	"mini-rpc/internal/transport"
 	"mini-rpc/internal/types"
@@ -28,8 +29,11 @@ func (s *RPCServer) handleRequest(conn net.Conn) {
 	for {
 		data, err := transport.ReadAndDeserialize(conn)
 		if err != nil {
-			log.Printf("[server.go]读取客户端请求错误:%v", err)
-			continue
+			// 客户端主动断开是正常行为，不打印
+			if err.Error() != "EOF" && !strings.Contains(err.Error(), "EOF") {
+				log.Printf("[server.go]读取客户端请求错误:%v", err)
+			}
+			return
 		}
 		result, err := s.functions[data.FuncName].Call(data.Arguments...)
 		if err != nil {
