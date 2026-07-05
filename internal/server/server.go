@@ -1,8 +1,10 @@
 package server
 
 import (
+	"fmt"
 	"log"
 	"net"
+	"reflect"
 	"strings"
 
 	"mini-rpc/internal/transport"
@@ -19,14 +21,50 @@ type RPCServer struct {
 }
 
 // 注册函数
-func (s *RPCServer) RegisterFunction(function types.Function) {
-	s.functions[function.Name] = function
+func (s *RPCServer) RegisterFunction(rcvr interface{}) {
+
+	// Implementation for registering functions
+	t := reflect.TypeOf(rcvr)  // 类型type
+	v := reflect.ValueOf(rcvr) // 值value
+	for i := 0; i < t.NumMethod(); i++ {
+		method := t.Method(i)
+		// method.Name,method.Type
+		// 给每个方法生成一个 Call 闭包
+		s.functions[method.Name] = types.Function{
+			Name: method.Name,
+			Call: func(args ...interface{}) ([]interface{}, error) {
+				// 1.函数传参
+				in := []reflect.Value{v}
+				for _, arg := range args {
+					in = append(in, reflect.ValueOf(arg))
+				}
+				// 2. 调用函数
+				out := method.Func.Call(in)
+
+				// 3. 处理返回值
+				if len(out) > 0 {
+					if e, _ := out[len(out)-1].Interface().(error); e != nil {
+						out = out[:len(out)-1] // 去掉最后一个 error
+						return nil, fmt.Errorf("[server.go]函数调用错误:%v", e)
+					}
+				}
+
+				// 4. 转成 []interface{}
+				result := make([]interface{}, len(out))
+				for i, vv := range out {
+					result[i] = vv.Interface()
+				}
+				return result, nil
+			},
+		}
+	}
 }
 
 // 接收客户端的函数调用请求
 func (s *RPCServer) handleRequest(conn net.Conn) {
 	defer conn.Close() // 关闭流，防止文件描述符占用
 	for {
+
 		data, err := transport.ReadAndDeserialize(conn)
 		if err != nil {
 			// 客户端主动断开是正常行为，不打印
@@ -35,17 +73,27 @@ func (s *RPCServer) handleRequest(conn net.Conn) {
 			}
 			return
 		}
-		result, err := s.functions[data.FuncName].Call(data.Arguments...)
+
+		function, ok := s.functions[data.FuncName]
+		if !ok {
+			log.Printf("[server.go]函数未注册:%v", data.FuncName)
+			transport.SendToClient(conn, types.ResponseData{Error: "函数未注册"})
+			continue
+		}
+
+		result, err := function.Call(data.Arguments...)
 		if err != nil {
 			log.Printf("[server.go]调用函数错误:%v", err)
+			transport.SendToClient(conn, types.ResponseData{Error: "函数调用错误"})
 			continue
-
 		}
+
 		// 封装res，响应结果
 		res := types.ResponseData{
 			Returns: result,
 			Error:   "",
 		}
+
 		err = transport.SendToClient(conn, res)
 		if err != nil {
 			log.Printf("[server.go]发送响应数据错误:%v", err)

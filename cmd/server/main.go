@@ -4,22 +4,20 @@ import (
 	"log"
 	"net"
 
-	"mini-rpc/internal/types"
 	"mini-rpc/pkg/rpc"
 )
+
+type Add struct{}
+
+func (a *Add) Add(x, y int) int {
+	return x + y
+}
 
 func main() {
 	server := rpc.NewServer()
 
 	// 注册一个加法函数
-	server.RegisterFunction(types.Function{
-		Name: "Add",
-		Call: func(args ...interface{}) ([]interface{}, error) {
-			a := args[0].(int)
-			b := args[1].(int)
-			return []interface{}{a + b}, nil
-		},
-	})
+	server.RegisterFunction(&Add{})
 
 	listener, err := net.Listen("tcp", ":8080")
 	if err != nil {
