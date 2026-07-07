@@ -18,20 +18,20 @@ import (
 // 	},
 // }
 
-func ReadAndDeserialize(conn net.Conn) (types.RequestData, error) {
+func ReadAndDeserialize(conn net.Conn) (types.RequestData, uint64, error) {
 	// 先读协议头
 	header := make([]byte, 15)
 	_, err := io.ReadFull(conn, header)
 	if err != nil {
-		return types.RequestData{}, fmt.Errorf("[transport.go]读取协议头错误:%v", err)
+		return types.RequestData{}, 0, fmt.Errorf("[transport.go]读取协议头错误:%v", err)
 	}
 	// 检验协议头
 	ok, err := protocol.CheckProtocolHeader(header)
 	if err != nil {
-		return types.RequestData{}, fmt.Errorf("[transport.go]协议头校验错误:%v", err)
+		return types.RequestData{}, 0, fmt.Errorf("[transport.go]协议头校验错误:%v", err)
 	}
 	if !ok {
-		return types.RequestData{}, fmt.Errorf("[transport.go]协议头校验失败")
+		return types.RequestData{}, 0, fmt.Errorf("[transport.go]协议头校验失败")
 	}
 	// 读取数据
 	bodyLength := binary.BigEndian.Uint32(header[11:15])
@@ -40,23 +40,25 @@ func ReadAndDeserialize(conn net.Conn) (types.RequestData, error) {
 	copy(msg, header)
 	_, err = io.ReadFull(conn, msg[15:])
 	if err != nil {
-		return types.RequestData{}, fmt.Errorf("[transport.go]读取数据错误:%v", err)
+		return types.RequestData{}, 0, fmt.Errorf("[transport.go]读取数据错误:%v", err)
 	}
+	// 解析 RequestID
+	requestID := binary.BigEndian.Uint64(header[3:11])
 	// 反序列化
 	var requestData types.RequestData
 	err = codec.Deserialize(msg[15:], &requestData)
 
-	return requestData, nil
+	return requestData, requestID, nil
 }
 
-func SendToClient(conn net.Conn, res types.ResponseData) error {
+func SendToClient(requestId uint64, conn net.Conn, res types.ResponseData) error {
 	// 序列化
 	bytes, err := codec.Serialize(res)
 	if err != nil {
 		return fmt.Errorf("[transport.go]序列化错误:%v", err)
 	}
 	// 添加协议头
-	protocol.AddHeadersBeforeBytes(&bytes)
+	protocol.AddHeadersBeforeBytes(requestId, &bytes)
 	// 发送数据
 	_, err = conn.Write(bytes)
 	if err != nil {
@@ -65,7 +67,7 @@ func SendToClient(conn net.Conn, res types.ResponseData) error {
 	return nil
 }
 
-func SendToServer(req types.RequestData) ([]byte, error) {
+func SendToServer(requestId uint64, req types.RequestData) ([]byte, error) {
 	// 获取服务器地址
 	config := config.LoadConfig()
 	if config == nil {
@@ -78,7 +80,7 @@ func SendToServer(req types.RequestData) ([]byte, error) {
 		return nil, fmt.Errorf("[transport.go]序列化错误:%v", err)
 	}
 	// 添加协议头
-	protocol.AddHeadersBeforeBytes(&bytes)
+	protocol.AddHeadersBeforeBytes(requestId, &bytes)
 	// 发送数据
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", config.Server.URL, config.Server.Port))
 	if err != nil {

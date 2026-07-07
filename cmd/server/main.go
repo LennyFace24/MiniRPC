@@ -4,6 +4,7 @@ import (
 	"log"
 	"net"
 
+	"mini-rpc/internal/middleware"
 	"mini-rpc/pkg/rpc"
 )
 
@@ -18,6 +19,9 @@ func main() {
 
 	// 注册一个加法函数
 	server.RegisterFunction(&Add{})
+	// 注册中间件
+	server.Use(middleware.Logger)
+	server.Use(middleware.Recovery)
 
 	listener, err := net.Listen("tcp", ":8080")
 	if err != nil {

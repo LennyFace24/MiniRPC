@@ -13,25 +13,28 @@ import (
 // BodyLeng:4 byte
 // Total:15 byte
 
-func AddHeadersBeforeBytes(b *[]byte) {
+func AddHeadersBeforeBytes(id uint64, b *[]byte) {
 	var header [15]byte
 	header[0] = 0xCC                                           // Magic
 	header[1] = 0x01                                           // Version
 	header[2] = 0x01                                           // MessageType
+	binary.BigEndian.PutUint64(header[3:11], id)               // RequestID
 	binary.BigEndian.PutUint32(header[11:15], uint32(len(*b))) // BodyLen
 	// RequestID, BodyLength, Total 等字段需要根据实际情况填充
 	*b = append(header[:], *b...)
 }
 
 // handle the data received from the client, and return the response data
-func ReadMsg(data []byte) ([]byte, error) {
+func ReadMsg(data []byte) ([]byte, uint64, error) {
 	// 检查数据长度是否足够
 	_, err := CheckProtocolHeader(data)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
+	// 解析 RequestID
+	requestID := binary.BigEndian.Uint64(data[3:11])
 	// 获得协议之后得数据
-	return data[15:], nil
+	return data[15:], requestID, nil
 }
 
 func CheckProtocolHeader(data []byte) (bool, error) {

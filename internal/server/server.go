@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 
+	"mini-rpc/internal/middleware"
 	"mini-rpc/internal/transport"
 	"mini-rpc/internal/types"
 )
@@ -17,7 +18,8 @@ func NewRPCServer() *RPCServer {
 
 // server
 type RPCServer struct {
-	functions map[string]types.Function
+	functions  map[string]types.Function
+	middleware []middleware.Middleware
 }
 
 // 注册函数
@@ -62,30 +64,17 @@ func (s *RPCServer) RegisterFunction(rcvr interface{}) {
 
 // 接收客户端的函数调用请求
 func (s *RPCServer) handleRequest(conn net.Conn) {
-	defer conn.Close() // 关闭流，防止文件描述符占用
-	for {
-
-		data, err := transport.ReadAndDeserialize(conn)
-		if err != nil {
-			// 客户端主动断开是正常行为，不打印
-			if err.Error() != "EOF" && !strings.Contains(err.Error(), "EOF") {
-				log.Printf("[server.go]读取客户端请求错误:%v", err)
-			}
-			return
-		}
-
-		function, ok := s.functions[data.FuncName]
+	realhandler := func(req types.RequestData) types.ResponseData {
+		function, ok := s.functions[req.FuncName]
 		if !ok {
-			log.Printf("[server.go]函数未注册:%v", data.FuncName)
-			transport.SendToClient(conn, types.ResponseData{Error: "函数未注册"})
-			continue
+			log.Printf("[server.go]函数未注册:%v", req.FuncName)
+			return types.ResponseData{Error: "函数未注册"}
 		}
 
-		result, err := function.Call(data.Arguments...)
+		result, err := function.Call(req.Arguments...)
 		if err != nil {
 			log.Printf("[server.go]调用函数错误:%v", err)
-			transport.SendToClient(conn, types.ResponseData{Error: "函数调用错误"})
-			continue
+			return types.ResponseData{Error: "函数调用错误"}
 		}
 
 		// 封装res，响应结果
@@ -93,8 +82,30 @@ func (s *RPCServer) handleRequest(conn net.Conn) {
 			Returns: result,
 			Error:   "",
 		}
+		return res
+	}
 
-		err = transport.SendToClient(conn, res)
+	handler := realhandler
+
+	if len(s.middleware) > 0 {
+		// 嵌套中间件
+		for i := 0; i < len(s.middleware); i++ {
+			handler = s.middleware[i](handler)
+		}
+	}
+
+	defer conn.Close() // 关闭流，防止文件描述符占用
+	for {
+		data, requestID, err := transport.ReadAndDeserialize(conn)
+		if err != nil {
+			// 客户端主动断开是正常行为，不打印
+			if err.Error() != "EOF" && !strings.Contains(err.Error(), "EOF") {
+				log.Printf("[server.go]读取客户端请求错误:%v", err)
+			}
+			return
+		}
+		res := handler(data) // 处理请求,这里直接包含中间件
+		err = transport.SendToClient(requestID, conn, res)
 		if err != nil {
 			log.Printf("[server.go]发送响应数据错误:%v", err)
 			continue
@@ -112,4 +123,10 @@ func (s *RPCServer) Start(listener net.Listener) {
 		}
 		go s.handleRequest(conn) // 每个连接一个 goroutine
 	}
+}
+
+// use中间件
+func (s *RPCServer) Use(middleware middleware.Middleware) {
+	// 把函数放到一个容器里
+	s.middleware = append(s.middleware, middleware)
 }
