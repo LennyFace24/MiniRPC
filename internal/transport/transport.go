@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log"
 	"net"
 
 	"mini-rpc/internal/codec"
@@ -67,53 +68,51 @@ func SendToClient(requestId uint64, conn net.Conn, res types.ResponseData) error
 	return nil
 }
 
-func SendToServer(requestId uint64, req types.RequestData) ([]byte, error) {
+func SendToServer(requestId uint64, conn net.Conn, req types.RequestData) error {
 	// 获取服务器地址
 	config := config.LoadConfig()
 	if config == nil {
-		return nil, fmt.Errorf("[transport.go]加载配置文件错误")
+		log.Printf("[transport.go]加载配置文件错误")
+		return fmt.Errorf("[transport.go]加载配置文件错误")
 	}
 
 	// 序列化
 	bytes, err := codec.Serialize(req)
 	if err != nil {
-		return nil, fmt.Errorf("[transport.go]序列化错误:%v", err)
+		log.Printf("[transport.go]序列化错误:%v", err)
+		return fmt.Errorf("[transport.go]序列化错误:%v", err)
 	}
 	// 添加协议头
 	protocol.AddHeadersBeforeBytes(requestId, &bytes)
-	// 发送数据
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", config.Server.URL, config.Server.Port))
-	if err != nil {
-		return nil, fmt.Errorf("[transport.go]连接服务器错误:%v", err)
-	}
-	defer conn.Close()
+
 	_, err = conn.Write(bytes)
 	if err != nil {
-		return nil, fmt.Errorf("[transport.go]发送数据错误:%v", err)
+		log.Printf("[transport.go]发送数据错误:%v", err)
+		return fmt.Errorf("[transport.go]发送数据错误:%v", err)
 	}
 	// 读取响应
-	respHeader := make([]byte, 15)
-	_, err = io.ReadFull(conn, respHeader)
-	if err != nil {
-		return nil, fmt.Errorf("[transport.go]读取响应协议头错误:%v", err)
-	}
-	// 检验协议头
-	ok, err := protocol.CheckProtocolHeader(respHeader)
-	if err != nil {
-		return nil, fmt.Errorf("[transport.go]响应协议头校验错误:%v", err)
-	}
-	if !ok {
-		return nil, fmt.Errorf("[transport.go]响应协议头校验失败")
-	}
-	// 读取响应数据
-	bodyLength := binary.BigEndian.Uint32(respHeader[11:15])
-	totalLen := 15 + bodyLength
-	respMsg := make([]byte, totalLen)
-	copy(respMsg, respHeader)
-	_, err = io.ReadFull(conn, respMsg[15:])
-	if err != nil {
-		return nil, fmt.Errorf("[transport.go]读取响应数据错误:%v", err)
-	}
-	return respMsg[15:], nil
+	// respHeader := make([]byte, 15)
+	// _, err = io.ReadFull(conn, respHeader)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("[transport.go]读取响应协议头错误:%v", err)
+	// }
+	// // 检验协议头
+	// ok, err := protocol.CheckProtocolHeader(respHeader)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("[transport.go]响应协议头校验错误:%v", err)
+	// }
+	// if !ok {
+	// 	return nil, fmt.Errorf("[transport.go]响应协议头校验失败")
+	// }
+	// // 读取响应数据
+	// bodyLength := binary.BigEndian.Uint32(respHeader[11:15])
+	// totalLen := 15 + bodyLength
+	// respMsg := make([]byte, totalLen)
+	// copy(respMsg, respHeader)
+	// _, err = io.ReadFull(conn, respMsg[15:])
+	// if err != nil {
+	// 	return nil, fmt.Errorf("[transport.go]读取响应数据错误:%v", err)
+	// }
+	return nil
 
 }
