@@ -45,7 +45,6 @@ func ReadAndDeserialize(conn net.Conn) (types.RequestData, uint64, error) {
 	}
 	// 解析 RequestID
 	requestID := binary.BigEndian.Uint64(header[3:11])
-	// 反序列化
 	var requestData types.RequestData
 	err = codec.Deserialize(msg[15:], &requestData)
 

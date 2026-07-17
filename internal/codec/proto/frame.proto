@@ -1,0 +1,13 @@
+syntax = "proto3";
+package codec;
+option go_package = "mini-rpc/internal/codec/proto";
+
+message MessageRequest {
+  string func_name = 1;
+  bytes  args = 2;
+}
+
+message MessageResponse {
+  bytes  returns = 1;
+  string error = 2;
+}
