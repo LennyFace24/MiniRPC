@@ -1,0 +1,16 @@
+syntax = "proto3";
+package calc;
+option go_package = "mini-rpc/internal/codec/proto/calc";
+
+service Calculator {
+  rpc Add(CalcReq) returns (CalcRsp);
+}
+
+message CalcReq {
+  int32 a = 1;
+  int32 b = 2;
+}
+
+message CalcRsp {
+  int32 result = 1;
+}

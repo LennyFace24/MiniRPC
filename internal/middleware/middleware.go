@@ -5,17 +5,15 @@ import (
 	"log"
 	"time"
 
-	"mini-rpc/internal/types"
+	framepb "mini-rpc/internal/codec/proto/framepb"
 )
 
-type HandlerFunc func(types.RequestData) types.ResponseData // 处理函数
+type HandlerFunc func(*framepb.MessageRequest) *framepb.MessageResponse
 
-// 中间件
 type Middleware func(HandlerFunc) HandlerFunc
 
-// logger 中间件
 var Logger Middleware = func(next HandlerFunc) HandlerFunc {
-	return func(req types.RequestData) types.ResponseData {
+	return func(req *framepb.MessageRequest) *framepb.MessageResponse {
 		log.Printf("请求:%s", req.FuncName)
 		start := time.Now()
 		resp := next(req)
@@ -25,10 +23,10 @@ var Logger Middleware = func(next HandlerFunc) HandlerFunc {
 }
 
 var Recovery Middleware = func(next HandlerFunc) HandlerFunc {
-	return func(req types.RequestData) (resp types.ResponseData) {
+	return func(req *framepb.MessageRequest) (resp *framepb.MessageResponse) {
 		defer func() {
 			if r := recover(); r != nil {
-				resp = types.ResponseData{
+				resp = &framepb.MessageResponse{
 					Error: fmt.Sprintf("panic:%v", r),
 				}
 			}

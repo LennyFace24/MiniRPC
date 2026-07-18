@@ -8,10 +8,10 @@ import (
 	"net"
 	"sync"
 
-	"mini-rpc/internal/codec"
+	framepb "mini-rpc/internal/codec/proto/framepb"
 	"mini-rpc/internal/config"
 	"mini-rpc/internal/transport"
-	"mini-rpc/internal/types"
+	"google.golang.org/protobuf/proto"
 )
 
 type RPCClient struct {
@@ -23,18 +23,17 @@ type RPCClient struct {
 }
 
 type RPCResult struct {
-	Returns []interface{}
-	Error   error
+	Body  []byte
+	Error error
 }
 
 type Future struct {
 	ch chan *RPCResult
 }
 
-// 异步获取
-func (f *Future) Get() ([]interface{}, error) {
+func (f *Future) Get() ([]byte, error) {
 	result := <-f.ch
-	return result.Returns, result.Error
+	return result.Body, result.Error
 }
 
 func NewRPCClient() *RPCClient {
@@ -46,78 +45,71 @@ func NewRPCClient() *RPCClient {
 	}
 }
 
-func (c *RPCClient) CallAsync(funcName string, args ...interface{}) *Future {
-	// 创建唯一的连接
+func (c *RPCClient) CallAsync(funcName string, body []byte) *Future {
 	c.once.Do(func() {
-		// 获取服务器地址
 		config := config.LoadConfig()
 		if config == nil {
 			log.Fatalf("[client.go]加载配置文件失败")
 		}
-		// port是int类型，需要转换为string
 		address := fmt.Sprintf("%s:%d", config.Server.URL, config.Server.Port)
 		conn, err := net.Dial("tcp", address)
 		if err != nil {
 			log.Fatalf("[client.go]连接服务器失败:%v", err)
 		}
 		c.conn = conn
-
-		go c.readLoop() // 启动读取响应的协程
+		go c.readLoop()
 	})
 
-	// 读写锁
 	c.mu.Lock()
-
 	id := c.nextID
 	c.nextID++
 	ch := make(chan *RPCResult, 1)
 	c.pending[id] = ch
 	c.mu.Unlock()
 
-	// 发送请求
-	c.Call(id, funcName, args...)
-
-	return &Future{ch: ch}
-}
-
-func (c *RPCClient) Call(requestId uint64, funcName string, args ...interface{}) {
-
-	// 封装请求体
-	request := types.RequestData{
-		FuncName:  funcName,
-		Arguments: args,
+	req := &framepb.MessageRequest{
+		FuncName: funcName,
+		Args:     body,
 	}
-	// 发送请求
-	// sendserver 只负责写
-	err := transport.SendToServer(requestId, c.conn, request)
+	err := transport.SendToServer(id, c.conn, req)
 	if err != nil {
 		log.Printf("[client.go]发送请求错误:%v", err)
-		return
 	}
+
+	return &Future{ch: ch}
 }
 
 func (c *RPCClient) readLoop() {
 	for {
 		header := make([]byte, 15)
-		io.ReadFull(c.conn, header)
-		bodyLen := binary.BigEndian.Uint32(header[11:15])
-		totalLen := 15 + bodyLen
-		msg := make([]byte, totalLen) // 接收到的响应
-		copy(msg, header)
-		io.ReadFull(c.conn, msg[15:])
-
-		// 获取请求id
-		requestID := binary.BigEndian.Uint64(header[3:11])
-
-		// 反序列化
-		var response types.ResponseData
-		codec.Deserialize(msg[15:], &response)
-
-		// 存入channel
-		if response.Error != "" {
-			log.Printf("[client.go]读取响应出错:" + response.Error)
+		_, err := io.ReadFull(c.conn, header)
+		if err != nil {
+			log.Printf("[client.go]读响应头错误:%v", err)
 			return
 		}
-		c.pending[requestID] <- &RPCResult{Returns: response.Returns, Error: nil} // 这里需要根据实际情况填充返回值
+		bodyLen := binary.BigEndian.Uint32(header[11:15])
+		totalLen := 15 + bodyLen
+		msg := make([]byte, totalLen)
+		copy(msg, header)
+		_, err = io.ReadFull(c.conn, msg[15:])
+		if err != nil {
+			log.Printf("[client.go]读响应体错误:%v", err)
+			return
+		}
+
+		requestID := binary.BigEndian.Uint64(header[3:11])
+
+		var response framepb.MessageResponse
+		err = proto.Unmarshal(msg[15:], &response)
+		if err != nil {
+			log.Printf("[client.go]反序列化响应错误:%v", err)
+			return
+		}
+
+		if response.Error != "" {
+			log.Printf("[client.go]读取响应出错: %s", response.Error)
+			return
+		}
+		c.pending[requestID] <- &RPCResult{Body: response.Returns, Error: nil}
 	}
 }

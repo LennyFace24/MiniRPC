@@ -1,6 +1,6 @@
 syntax = "proto3";
-package codec;
-option go_package = "mini-rpc/internal/codec/proto";
+package framepb;
+option go_package = "mini-rpc/internal/codec/proto/framepb";
 
 message MessageRequest {
   string func_name = 1;

@@ -43,20 +43,15 @@ func (p *Pool) NewConn(addr string) *RPCClient {
 	return conn
 }
 
-func (p *Pool) CallAsync(funcname string, mode int, args ...interface{}) *Future {
-	// 这里的选取策略需要决定
+func (p *Pool) CallAsync(funcname string, mode int, body []byte) *Future {
 	if mode == RoundRobin {
-		conn := p.roundRobin()
-		return conn.CallAsync(funcname, args...)
+		return p.roundRobin().CallAsync(funcname, body)
 	}
 	if mode == LeastConnections {
-		conn := p.leastConnections()
-		return conn.CallAsync(funcname, args...)
-		
+		return p.leastConnections().CallAsync(funcname, body)
 	}
 	if mode == Random {
-		conn := p.random()
-		return conn.CallAsync(funcname, args...)
+		return p.random().CallAsync(funcname, body)
 	}
 	log.Default().Printf("[pool.go]负载均衡策略错误:%v", mode)
 	return nil

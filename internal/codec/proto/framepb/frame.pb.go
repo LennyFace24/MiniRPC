@@ -2,9 +2,9 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v7.35.0
-// source: internal/codec/proto/frame.proto
+// source: internal/codec/proto/framepb/frame.proto
 
-package proto
+package framepb
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -31,7 +31,7 @@ type MessageRequest struct {
 
 func (x *MessageRequest) Reset() {
 	*x = MessageRequest{}
-	mi := &file_internal_codec_proto_frame_proto_msgTypes[0]
+	mi := &file_internal_codec_proto_framepb_frame_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -43,7 +43,7 @@ func (x *MessageRequest) String() string {
 func (*MessageRequest) ProtoMessage() {}
 
 func (x *MessageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_codec_proto_frame_proto_msgTypes[0]
+	mi := &file_internal_codec_proto_framepb_frame_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -56,7 +56,7 @@ func (x *MessageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageRequest.ProtoReflect.Descriptor instead.
 func (*MessageRequest) Descriptor() ([]byte, []int) {
-	return file_internal_codec_proto_frame_proto_rawDescGZIP(), []int{0}
+	return file_internal_codec_proto_framepb_frame_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *MessageRequest) GetFuncName() string {
@@ -83,7 +83,7 @@ type MessageResponse struct {
 
 func (x *MessageResponse) Reset() {
 	*x = MessageResponse{}
-	mi := &file_internal_codec_proto_frame_proto_msgTypes[1]
+	mi := &file_internal_codec_proto_framepb_frame_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -95,7 +95,7 @@ func (x *MessageResponse) String() string {
 func (*MessageResponse) ProtoMessage() {}
 
 func (x *MessageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_codec_proto_frame_proto_msgTypes[1]
+	mi := &file_internal_codec_proto_framepb_frame_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -108,7 +108,7 @@ func (x *MessageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageResponse.ProtoReflect.Descriptor instead.
 func (*MessageResponse) Descriptor() ([]byte, []int) {
-	return file_internal_codec_proto_frame_proto_rawDescGZIP(), []int{1}
+	return file_internal_codec_proto_framepb_frame_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *MessageResponse) GetReturns() []byte {
@@ -125,36 +125,36 @@ func (x *MessageResponse) GetError() string {
 	return ""
 }
 
-var File_internal_codec_proto_frame_proto protoreflect.FileDescriptor
+var File_internal_codec_proto_framepb_frame_proto protoreflect.FileDescriptor
 
-const file_internal_codec_proto_frame_proto_rawDesc = "" +
+const file_internal_codec_proto_framepb_frame_proto_rawDesc = "" +
 	"\n" +
-	" internal/codec/proto/frame.proto\x12\x05codec\"A\n" +
+	"(internal/codec/proto/framepb/frame.proto\x12\aframepb\"A\n" +
 	"\x0eMessageRequest\x12\x1b\n" +
 	"\tfunc_name\x18\x01 \x01(\tR\bfuncName\x12\x12\n" +
 	"\x04args\x18\x02 \x01(\fR\x04args\"A\n" +
 	"\x0fMessageResponse\x12\x18\n" +
 	"\areturns\x18\x01 \x01(\fR\areturns\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05errorB\x1fZ\x1dmini-rpc/internal/codec/protob\x06proto3"
+	"\x05error\x18\x02 \x01(\tR\x05errorB'Z%mini-rpc/internal/codec/proto/framepbb\x06proto3"
 
 var (
-	file_internal_codec_proto_frame_proto_rawDescOnce sync.Once
-	file_internal_codec_proto_frame_proto_rawDescData []byte
+	file_internal_codec_proto_framepb_frame_proto_rawDescOnce sync.Once
+	file_internal_codec_proto_framepb_frame_proto_rawDescData []byte
 )
 
-func file_internal_codec_proto_frame_proto_rawDescGZIP() []byte {
-	file_internal_codec_proto_frame_proto_rawDescOnce.Do(func() {
-		file_internal_codec_proto_frame_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_codec_proto_frame_proto_rawDesc), len(file_internal_codec_proto_frame_proto_rawDesc)))
+func file_internal_codec_proto_framepb_frame_proto_rawDescGZIP() []byte {
+	file_internal_codec_proto_framepb_frame_proto_rawDescOnce.Do(func() {
+		file_internal_codec_proto_framepb_frame_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_codec_proto_framepb_frame_proto_rawDesc), len(file_internal_codec_proto_framepb_frame_proto_rawDesc)))
 	})
-	return file_internal_codec_proto_frame_proto_rawDescData
+	return file_internal_codec_proto_framepb_frame_proto_rawDescData
 }
 
-var file_internal_codec_proto_frame_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
-var file_internal_codec_proto_frame_proto_goTypes = []any{
-	(*MessageRequest)(nil),  // 0: codec.MessageRequest
-	(*MessageResponse)(nil), // 1: codec.MessageResponse
+var file_internal_codec_proto_framepb_frame_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_internal_codec_proto_framepb_frame_proto_goTypes = []any{
+	(*MessageRequest)(nil),  // 0: framepb.MessageRequest
+	(*MessageResponse)(nil), // 1: framepb.MessageResponse
 }
-var file_internal_codec_proto_frame_proto_depIdxs = []int32{
+var file_internal_codec_proto_framepb_frame_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
 	0, // [0:0] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
@@ -162,26 +162,26 @@ var file_internal_codec_proto_frame_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_internal_codec_proto_frame_proto_init() }
-func file_internal_codec_proto_frame_proto_init() {
-	if File_internal_codec_proto_frame_proto != nil {
+func init() { file_internal_codec_proto_framepb_frame_proto_init() }
+func file_internal_codec_proto_framepb_frame_proto_init() {
+	if File_internal_codec_proto_framepb_frame_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_codec_proto_frame_proto_rawDesc), len(file_internal_codec_proto_frame_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_codec_proto_framepb_frame_proto_rawDesc), len(file_internal_codec_proto_framepb_frame_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_internal_codec_proto_frame_proto_goTypes,
-		DependencyIndexes: file_internal_codec_proto_frame_proto_depIdxs,
-		MessageInfos:      file_internal_codec_proto_frame_proto_msgTypes,
+		GoTypes:           file_internal_codec_proto_framepb_frame_proto_goTypes,
+		DependencyIndexes: file_internal_codec_proto_framepb_frame_proto_depIdxs,
+		MessageInfos:      file_internal_codec_proto_framepb_frame_proto_msgTypes,
 	}.Build()
-	File_internal_codec_proto_frame_proto = out.File
-	file_internal_codec_proto_frame_proto_goTypes = nil
-	file_internal_codec_proto_frame_proto_depIdxs = nil
+	File_internal_codec_proto_framepb_frame_proto = out.File
+	file_internal_codec_proto_framepb_frame_proto_goTypes = nil
+	file_internal_codec_proto_framepb_frame_proto_depIdxs = nil
 }

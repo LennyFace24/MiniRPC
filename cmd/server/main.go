@@ -1,25 +1,24 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net"
 
+	calc "mini-rpc/internal/codec/proto/calc"
 	"mini-rpc/internal/middleware"
 	"mini-rpc/pkg/rpc"
 )
 
-type Add struct{}
+type CalcServer struct{}
 
-func (a *Add) Add(x, y int) int {
-	return x + y
+func (s *CalcServer) Add(ctx context.Context, req *calc.CalcReq) (*calc.CalcRsp, error) {
+	return &calc.CalcRsp{Result: req.A + req.B}, nil
 }
 
 func main() {
 	server := rpc.NewServer()
-
-	// 注册一个加法函数
-	server.RegisterFunction(&Add{})
-	// 注册中间件
+	calc.RegisterCalculatorServer(server, &CalcServer{})
 	server.Use(middleware.Logger)
 	server.Use(middleware.Recovery)
 
