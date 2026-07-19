@@ -48,6 +48,7 @@ func generateImports(g *protogen.GeneratedFile) {
 
 func generateClient(g *protogen.GeneratedFile, svc *protogen.Service) {
 	clientName := svc.GoName + "Client"
+	serviceName := string(svc.Desc.Name())
 	g.P("type ", clientName, " struct {")
 	g.P("	pool *client.Pool")
 	g.P("}")
@@ -61,13 +62,14 @@ func generateClient(g *protogen.GeneratedFile, svc *protogen.Service) {
 		inputType := method.Input.GoIdent
 		outputType := method.Output.GoIdent
 		methodName := string(method.Desc.Name())
+		fullName := serviceName + "." + methodName
 
 		g.P("func (c *", clientName, ") ", method.GoName, "(ctx context.Context, req *", inputType, ") (*", outputType, ", error) {")
 		g.P("	body, err := proto.Marshal(req)")
 		g.P("	if err != nil {")
 		g.P("		return nil, err")
 		g.P("	}")
-		g.P(`	future := c.pool.CallAsync("`, methodName, `", client.RoundRobin, body)`)
+		g.P(`	future := c.pool.CallAsync(ctx, "`, fullName, `", client.RoundRobin, body)`)
 		g.P("	ret, err := future.Get()")
 		g.P("	if err != nil {")
 		g.P("		return nil, err")
@@ -125,8 +127,9 @@ func generateServerWrapper(g *protogen.GeneratedFile, svc *protogen.Service) {
 func generateRegister(g *protogen.GeneratedFile, svc *protogen.Service) {
 	serverName := svc.GoName + "Server"
 	wrapperName := svc.GoName + "ServerWrapper"
+	serviceName := string(svc.Desc.Name())
 	g.P("func Register", serverName, "(s *server.RPCServer, srv ", serverName, ") {")
 	g.P("	wrapper := &", wrapperName, "{Srv: srv}")
-	g.P("	s.RegisterFunction(wrapper)")
+	g.P(`	s.RegisterService("`, serviceName, `", wrapper)`)
 	g.P("}")
 }

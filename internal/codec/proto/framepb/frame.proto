@@ -5,6 +5,7 @@ option go_package = "mini-rpc/internal/codec/proto/framepb";
 message MessageRequest {
   string func_name = 1;
   bytes  args = 2;
+  map<string,string> metadata = 3;
 }
 
 message MessageResponse {

@@ -1,28 +1,32 @@
 package client
 
 import (
+	"context"
+	"crypto/tls"
 	"log"
 	"math/rand"
 	"sync"
+
+	"mini-rpc/pkg/registry"
 )
 
-// 负载均衡策略
 const (
 	RoundRobin = iota
 	LeastConnections
 	Random
 )
 
-// 连接池
 type Pool struct {
-	conn  []*RPCClient
+	reg  registry.RegistryCenter
+	addr []string
+	conn []*RPCClient
 	where int
 	mu    sync.Mutex
 }
 
 func NewPool(size int, addr string) *Pool {
-
 	p := &Pool{
+		addr:  []string{addr},
 		conn:  make([]*RPCClient, 0, size),
 		where: 0,
 		mu:    sync.Mutex{},
@@ -34,24 +38,57 @@ func NewPool(size int, addr string) *Pool {
 	return p
 }
 
+func NewPoolTLS(size int, addr string, tlsConfig *tls.Config) *Pool {
+	p := NewPool(size, addr)
+	for _, conn := range p.conn {
+		conn.tlsConfig = tlsConfig
+	}
+	return p
+}
+
+func NewPoolWithRegistry(size int, reg registry.RegistryCenter) *Pool {
+	p := &Pool{
+		reg:   reg,
+		addr:  make([]string, 0),
+		conn:  make([]*RPCClient, 0, size),
+		where: 0,
+		mu:    sync.Mutex{},
+	}
+	for i := 0; i < size; i++ {
+		conn := NewRPCClient()
+		p.conn = append(p.conn, conn)
+	}
+	p.refresh()
+	return p
+}
+
+func (p *Pool) refresh() {
+	addrs, ok := p.reg.Discover("Calculator")
+	if !ok {
+		log.Printf("[pool.go]服务发现失败")
+		return
+	}
+	p.addr = addrs
+	log.Printf("[pool.go]发现服务地址:%v", addrs)
+}
+
 func (p *Pool) NewConn(addr string) *RPCClient {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	// 创建新的连接
 	conn := NewRPCClient()
 	p.conn = append(p.conn, conn)
 	return conn
 }
 
-func (p *Pool) CallAsync(funcname string, mode int, body []byte) *Future {
+func (p *Pool) CallAsync(ctx context.Context, funcname string, mode int, body []byte) *Future {
 	if mode == RoundRobin {
-		return p.roundRobin().CallAsync(funcname, body)
+		return p.roundRobin().CallAsync(ctx, funcname, body)
 	}
 	if mode == LeastConnections {
-		return p.leastConnections().CallAsync(funcname, body)
+		return p.leastConnections().CallAsync(ctx, funcname, body)
 	}
 	if mode == Random {
-		return p.random().CallAsync(funcname, body)
+		return p.random().CallAsync(ctx, funcname, body)
 	}
 	log.Default().Printf("[pool.go]负载均衡策略错误:%v", mode)
 	return nil
@@ -60,8 +97,6 @@ func (p *Pool) CallAsync(funcname string, mode int, body []byte) *Future {
 func (p *Pool) roundRobin() *RPCClient {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-
-	// 用where
 	if p.where >= len(p.conn) {
 		p.where = 0
 	}
@@ -73,8 +108,6 @@ func (p *Pool) roundRobin() *RPCClient {
 func (p *Pool) leastConnections() *RPCClient {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-
-	// 获取每个rpcclient的连接数，选出其中最少的
 	min := p.conn[0]
 	for _, conn := range p.conn[1:] {
 		if len(conn.pending) < len(min.pending) {
@@ -82,7 +115,6 @@ func (p *Pool) leastConnections() *RPCClient {
 		}
 	}
 	return min
-
 }
 
 func (p *Pool) random() *RPCClient {

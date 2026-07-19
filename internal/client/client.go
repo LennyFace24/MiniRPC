@@ -1,6 +1,8 @@
 package client
 
 import (
+	"context"
+	"crypto/tls"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -8,18 +10,19 @@ import (
 	"net"
 	"sync"
 
+	"google.golang.org/protobuf/proto"
 	framepb "mini-rpc/internal/codec/proto/framepb"
 	"mini-rpc/internal/config"
 	"mini-rpc/internal/transport"
-	"google.golang.org/protobuf/proto"
 )
 
 type RPCClient struct {
-	conn    net.Conn
-	pending map[uint64]chan *RPCResult
-	nextID  uint64
-	mu      sync.Mutex
-	once    sync.Once
+	conn      net.Conn
+	pending   map[uint64]chan *RPCResult
+	nextID    uint64
+	mu        sync.Mutex
+	once      sync.Once
+	tlsConfig *tls.Config
 }
 
 type RPCResult struct {
@@ -45,14 +48,27 @@ func NewRPCClient() *RPCClient {
 	}
 }
 
-func (c *RPCClient) CallAsync(funcName string, body []byte) *Future {
+func (c *RPCClient) CallAsync(ctx context.Context, funcName string, body []byte) *Future {
+
+	deadline, _ := ctx.Deadline()
+	metadata := make(map[string]string)
+	if !deadline.IsZero() {
+		metadata["deadline"] = fmt.Sprintf("%d", deadline.UnixNano())
+	}
+
 	c.once.Do(func() {
 		config := config.LoadConfig()
 		if config == nil {
 			log.Fatalf("[client.go]加载配置文件失败")
 		}
 		address := fmt.Sprintf("%s:%d", config.Server.URL, config.Server.Port)
-		conn, err := net.Dial("tcp", address)
+		var conn net.Conn
+		var err error
+		if c.tlsConfig != nil {
+			conn, err = tls.Dial("tcp", address, c.tlsConfig)
+		} else {
+			conn, err = net.Dial("tcp", address)
+		}
 		if err != nil {
 			log.Fatalf("[client.go]连接服务器失败:%v", err)
 		}
@@ -70,6 +86,7 @@ func (c *RPCClient) CallAsync(funcName string, body []byte) *Future {
 	req := &framepb.MessageRequest{
 		FuncName: funcName,
 		Args:     body,
+		Metadata: metadata,
 	}
 	err := transport.SendToServer(id, c.conn, req)
 	if err != nil {

@@ -22,7 +22,7 @@ func (c *CalculatorClient) Add(ctx context.Context, req *CalcReq) (*CalcRsp, err
 	if err != nil {
 		return nil, err
 	}
-	future := c.pool.CallAsync("Add", client.RoundRobin, body)
+	future := c.pool.CallAsync(ctx, "Calculator.Add", client.RoundRobin, body)
 	ret, err := future.Get()
 	if err != nil {
 		return nil, err
@@ -58,5 +58,5 @@ func (w *CalculatorServerWrapper) Add(body []byte) ([]byte, error) {
 
 func RegisterCalculatorServer(s *server.RPCServer, srv CalculatorServer) {
 	wrapper := &CalculatorServerWrapper{Srv: srv}
-	s.RegisterFunction(wrapper)
+	s.RegisterService("Calculator", wrapper)
 }

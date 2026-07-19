@@ -1,10 +1,14 @@
 package server
 
 import (
+	"context"
+	"crypto/tls"
 	"log"
 	"net"
 	"reflect"
+	"strconv"
 	"strings"
+	"time"
 
 	framepb "mini-rpc/internal/codec/proto/framepb"
 	"mini-rpc/internal/middleware"
@@ -13,22 +17,26 @@ import (
 )
 
 func NewRPCServer() *RPCServer {
-	return &RPCServer{functions: make(map[string]types.Function)}
+	return &RPCServer{services: make(map[string]*types.ServiceDesc)}
 }
 
 type RPCServer struct {
-	functions  map[string]types.Function
+	services   map[string]*types.ServiceDesc
 	middleware []middleware.Middleware
 }
 
-func (s *RPCServer) RegisterFunction(rcvr interface{}) {
+func (s *RPCServer) RegisterService(serviceName string, rcvr interface{}) {
+	svc := &types.ServiceDesc{
+		ServiceName: serviceName,
+		Methods:     make(map[string]*types.MethodDesc),
+	}
+
 	t := reflect.TypeOf(rcvr)
 	v := reflect.ValueOf(rcvr)
 	for i := 0; i < t.NumMethod(); i++ {
 		method := t.Method(i)
 		methodValue := v.Method(i)
 
-		// 检查签名：func(body []byte) ([]byte, error)
 		mtype := method.Type
 		if mtype.NumIn() != 2 || mtype.NumOut() != 2 {
 			continue
@@ -40,9 +48,9 @@ func (s *RPCServer) RegisterFunction(rcvr interface{}) {
 			continue
 		}
 
-		s.functions[method.Name] = types.Function{
-			Name: method.Name,
-			Call: func(body []byte) ([]byte, error) {
+		svc.Methods[method.Name] = &types.MethodDesc{
+			MethodName: method.Name,
+			Handler: func(body []byte) ([]byte, error) {
 				out := methodValue.Call([]reflect.Value{reflect.ValueOf(body)})
 				if e, _ := out[1].Interface().(error); e != nil {
 					return nil, e
@@ -51,17 +59,71 @@ func (s *RPCServer) RegisterFunction(rcvr interface{}) {
 			},
 		}
 	}
+
+	s.services[serviceName] = svc
 }
 
 func (s *RPCServer) handleRequest(conn net.Conn) {
-	realhandler := middleware.HandlerFunc(func(req *framepb.MessageRequest) *framepb.MessageResponse {
-		function, ok := s.functions[req.FuncName]
-		if !ok {
-			log.Printf("[server.go]函数未注册:%v", req.FuncName)
-			return &framepb.MessageResponse{Error: "函数未注册"}
+	defer conn.Close()
+	for {
+		data, requestID, err := transport.ReadAndDeserialize(conn)
+		if err != nil {
+			if !strings.Contains(err.Error(), "EOF") && !strings.Contains(err.Error(), "closed") {
+				log.Printf("[server.go]读取客户端请求错误:%v", err)
+			}
+			return
 		}
 
-		result, err := function.Call(req.Args)
+		ctx := context.Background()
+		if timeoutMs, ok := data.Metadata["timeout"]; ok {
+			if ms, err := strconv.Atoi(timeoutMs); err == nil {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, time.Duration(ms)*time.Millisecond)
+				defer cancel()
+			}
+		}
+		if traceID, ok := data.Metadata["trace-id"]; ok {
+			ctx = context.WithValue(ctx, "trace-id", traceID)
+			log.Printf("[server.go]trace=%s 请求:%s", traceID, data.FuncName)
+		}
+
+		res := s.executeHandler(ctx, data)
+		err = transport.SendToClient(requestID, conn, res)
+		if err != nil {
+			log.Printf("[server.go]发送响应数据错误:%v", err)
+			continue
+		}
+	}
+}
+
+func (s *RPCServer) executeHandler(ctx context.Context, req *framepb.MessageRequest) *framepb.MessageResponse {
+	realhandler := middleware.HandlerFunc(func(req *framepb.MessageRequest) *framepb.MessageResponse {
+		parts := strings.SplitN(req.FuncName, ".", 2)
+		if len(parts) != 2 {
+			return &framepb.MessageResponse{Error: "函数名格式错误，应为 ServiceName.MethodName"}
+		}
+		serviceName := parts[0]
+		methodName := parts[1]
+
+		svc, ok := s.services[serviceName]
+		if !ok {
+			log.Printf("[server.go]服务未注册:%v", serviceName)
+			return &framepb.MessageResponse{Error: "服务未注册: " + serviceName}
+		}
+
+		md, ok := svc.Methods[methodName]
+		if !ok {
+			log.Printf("[server.go]函数未注册:%v", methodName)
+			return &framepb.MessageResponse{Error: "函数未注册: " + methodName}
+		}
+
+		if deadline, ok := ctx.Deadline(); ok {
+			if time.Now().After(deadline) {
+				return &framepb.MessageResponse{Error: "context deadline exceeded"}
+			}
+		}
+
+		result, err := md.Handler(req.Args)
 		if err != nil {
 			log.Printf("[server.go]调用函数错误:%v", err)
 			return &framepb.MessageResponse{Error: "函数调用错误"}
@@ -74,29 +136,13 @@ func (s *RPCServer) handleRequest(conn net.Conn) {
 	})
 
 	handler := realhandler
-
 	if len(s.middleware) > 0 {
-		for i := 0; i < len(s.middleware); i++ {
+		for i := range s.middleware {
 			handler = s.middleware[i](handler)
 		}
 	}
 
-	defer conn.Close()
-	for {
-		data, requestID, err := transport.ReadAndDeserialize(conn)
-		if err != nil {
-			if !strings.Contains(err.Error(), "EOF") && !strings.Contains(err.Error(), "closed") {
-				log.Printf("[server.go]读取客户端请求错误:%v", err)
-			}
-			return
-		}
-		res := handler(data)
-		err = transport.SendToClient(requestID, conn, res)
-		if err != nil {
-			log.Printf("[server.go]发送响应数据错误:%v", err)
-			continue
-		}
-	}
+	return handler(req)
 }
 
 func (s *RPCServer) Start(listener net.Listener) {
@@ -108,6 +154,19 @@ func (s *RPCServer) Start(listener net.Listener) {
 		}
 		go s.handleRequest(conn)
 	}
+}
+
+func (s *RPCServer) ServeTLS(addr, certFile, keyFile string) {
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		log.Fatalf("[server.go]加载证书失败:%v", err)
+	}
+	config := &tls.Config{Certificates: []tls.Certificate{cert}}
+	listener, err := tls.Listen("tcp", addr, config)
+	if err != nil {
+		log.Fatalf("[server.go]TLS监听失败:%v", err)
+	}
+	s.Start(listener)
 }
 
 func (s *RPCServer) Use(mw middleware.Middleware) {

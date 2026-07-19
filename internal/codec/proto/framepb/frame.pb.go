@@ -25,6 +25,7 @@ type MessageRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	FuncName      string                 `protobuf:"bytes,1,opt,name=func_name,json=funcName,proto3" json:"func_name,omitempty"`
 	Args          []byte                 `protobuf:"bytes,2,opt,name=args,proto3" json:"args,omitempty"`
+	Metadata      map[string]string      `protobuf:"bytes,3,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -69,6 +70,13 @@ func (x *MessageRequest) GetFuncName() string {
 func (x *MessageRequest) GetArgs() []byte {
 	if x != nil {
 		return x.Args
+	}
+	return nil
+}
+
+func (x *MessageRequest) GetMetadata() map[string]string {
+	if x != nil {
+		return x.Metadata
 	}
 	return nil
 }
@@ -129,10 +137,14 @@ var File_internal_codec_proto_framepb_frame_proto protoreflect.FileDescriptor
 
 const file_internal_codec_proto_framepb_frame_proto_rawDesc = "" +
 	"\n" +
-	"(internal/codec/proto/framepb/frame.proto\x12\aframepb\"A\n" +
+	"(internal/codec/proto/framepb/frame.proto\x12\aframepb\"\xc1\x01\n" +
 	"\x0eMessageRequest\x12\x1b\n" +
 	"\tfunc_name\x18\x01 \x01(\tR\bfuncName\x12\x12\n" +
-	"\x04args\x18\x02 \x01(\fR\x04args\"A\n" +
+	"\x04args\x18\x02 \x01(\fR\x04args\x12A\n" +
+	"\bmetadata\x18\x03 \x03(\v2%.framepb.MessageRequest.MetadataEntryR\bmetadata\x1a;\n" +
+	"\rMetadataEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"A\n" +
 	"\x0fMessageResponse\x12\x18\n" +
 	"\areturns\x18\x01 \x01(\fR\areturns\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05errorB'Z%mini-rpc/internal/codec/proto/framepbb\x06proto3"
@@ -149,17 +161,19 @@ func file_internal_codec_proto_framepb_frame_proto_rawDescGZIP() []byte {
 	return file_internal_codec_proto_framepb_frame_proto_rawDescData
 }
 
-var file_internal_codec_proto_framepb_frame_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_internal_codec_proto_framepb_frame_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_internal_codec_proto_framepb_frame_proto_goTypes = []any{
 	(*MessageRequest)(nil),  // 0: framepb.MessageRequest
 	(*MessageResponse)(nil), // 1: framepb.MessageResponse
+	nil,                     // 2: framepb.MessageRequest.MetadataEntry
 }
 var file_internal_codec_proto_framepb_frame_proto_depIdxs = []int32{
-	0, // [0:0] is the sub-list for method output_type
-	0, // [0:0] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	2, // 0: framepb.MessageRequest.metadata:type_name -> framepb.MessageRequest.MetadataEntry
+	1, // [1:1] is the sub-list for method output_type
+	1, // [1:1] is the sub-list for method input_type
+	1, // [1:1] is the sub-list for extension type_name
+	1, // [1:1] is the sub-list for extension extendee
+	0, // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_internal_codec_proto_framepb_frame_proto_init() }
@@ -173,7 +187,7 @@ func file_internal_codec_proto_framepb_frame_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_codec_proto_framepb_frame_proto_rawDesc), len(file_internal_codec_proto_framepb_frame_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
