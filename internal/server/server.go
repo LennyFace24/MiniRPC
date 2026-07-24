@@ -6,7 +6,6 @@ import (
 	"log"
 	"net"
 	"reflect"
-	"strconv"
 	"strings"
 	"time"
 
@@ -75,12 +74,10 @@ func (s *RPCServer) handleRequest(conn net.Conn) {
 		}
 
 		ctx := context.Background()
-		if timeoutMs, ok := data.Metadata["timeout"]; ok {
-			if ms, err := strconv.Atoi(timeoutMs); err == nil {
-				var cancel context.CancelFunc
-				ctx, cancel = context.WithTimeout(ctx, time.Duration(ms)*time.Millisecond)
-				defer cancel()
-			}
+		// 用 transport.ParseDeadline 解析 metadata 中的 deadline（绝对时间，纳秒）
+		// 替代原来 key="timeout" 按 ms 解释的 buggy 实现
+		if deadline, ok := transport.ParseDeadline(data.Metadata); ok {
+			ctx, _ = context.WithDeadline(ctx, deadline)
 		}
 		if traceID, ok := data.Metadata["trace-id"]; ok {
 			ctx = context.WithValue(ctx, "trace-id", traceID)
@@ -145,12 +142,14 @@ func (s *RPCServer) executeHandler(ctx context.Context, req *framepb.MessageRequ
 	return handler(req)
 }
 
+// Start 阻塞接收连接。listener 关闭后会返回（不再 continue 刷日志）。
 func (s *RPCServer) Start(listener net.Listener) {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			log.Printf("[server.go]接受客户端连接错误:%v", err)
-			continue
+			// listener 被关闭时返回，不再 continue 死循环刷日志
+			log.Printf("[server.go]listener 退出:%v", err)
+			return
 		}
 		go s.handleRequest(conn)
 	}

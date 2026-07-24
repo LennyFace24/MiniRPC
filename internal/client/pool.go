@@ -3,6 +3,8 @@ package client
 import (
 	"context"
 	"crypto/tls"
+	"errors"
+	"fmt"
 	"log"
 	"math/rand"
 	"sync"
@@ -17,11 +19,11 @@ const (
 )
 
 type Pool struct {
-	reg   registry.RegistryCenter
-	addrs []string
-	pools map[string][]*RPCClient
+	reg       registry.RegistryCenter
+	addrs     []string
+	pools     map[string][]*RPCClient
 	addrIndex int
-	mu    sync.Mutex
+	mu        sync.Mutex
 }
 
 func NewPool(size int, addr string) *Pool {
@@ -31,7 +33,7 @@ func NewPool(size int, addr string) *Pool {
 	}
 	pools := make([]*RPCClient, size)
 	for i := range size {
-		pools[i] = NewRPCClient()
+		pools[i] = NewRPCClientWithAddr(addr)
 	}
 	p.pools[addr] = pools
 	return p
@@ -73,7 +75,7 @@ func (p *Pool) refresh() {
 	for _, addr := range addrs {
 		newAddrs[addr] = true
 		if _, exists := p.pools[addr]; !exists {
-			p.pools[addr] = []*RPCClient{NewRPCClient()}
+			p.pools[addr] = []*RPCClient{NewRPCClientWithAddr(addr)}
 		}
 	}
 
@@ -148,16 +150,17 @@ func (p *Pool) pickConn(addr string, mode int) *RPCClient {
 	return conns[0]
 }
 
-func (p *Pool) CallAsync(ctx context.Context, funcname string, mode int, body []byte) *Future {
+// CallAsync 发起一次异步调用。
+// 返回 (*Future, error)：地址不可用 / 发送失败时 future=nil, err 非 nil。
+// 调用方应用 ctx 控制超时：future.Get(ctx)。
+func (p *Pool) CallAsync(ctx context.Context, funcname string, mode int, body []byte) (*Future, error) {
 	addr := p.pickAddr(mode)
 	if addr == "" {
-		log.Printf("[pool.go]没有可用服务地址")
-		return nil
+		return nil, errors.New("[pool.go]没有可用服务地址")
 	}
 	conn := p.pickConn(addr, mode)
 	if conn == nil {
-		log.Printf("[pool.go]地址%s没有可用连接", addr)
-		return nil
+		return nil, fmt.Errorf("[pool.go]地址%s没有可用连接", addr)
 	}
 	return conn.CallAsync(ctx, funcname, body)
 }

@@ -22,8 +22,11 @@ func (c *CalculatorClient) Add(ctx context.Context, req *CalcReq) (*CalcRsp, err
 	if err != nil {
 		return nil, err
 	}
-	future := c.pool.CallAsync(ctx, "Calculator.Add", client.RoundRobin, body)
-	ret, err := future.Get()
+	future, err := c.pool.CallAsync(ctx, "Calculator.Add", client.RoundRobin, body)
+	if err != nil {
+		return nil, err
+	}
+	ret, err := future.Get(ctx)
 	if err != nil {
 		return nil, err
 	}
