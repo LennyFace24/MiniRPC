@@ -15,7 +15,7 @@ import (
 // testPoolHandler 测试用的服务（不依赖 calc，避免 import cycle）
 type testPoolHandler struct{}
 
-func (s *testPoolHandler) Add(body []byte) ([]byte, error) {
+func (s *testPoolHandler) Add(ctx context.Context, body []byte) ([]byte, error) {
 	if len(body) != 8 {
 		return nil, nil
 	}
@@ -177,24 +177,60 @@ func TestNewPoolSize(t *testing.T) {
 }
 
 type staticRegistry struct {
-	addrs []string
+	addrs    []string
+	services map[string][]string
 }
 
 func (r *staticRegistry) Register(string, string) {}
 
-func (r *staticRegistry) Discover(string) ([]string, bool) {
+func (r *staticRegistry) Discover(serviceName string) ([]string, bool) {
+	if r.services != nil {
+		addrs, ok := r.services[serviceName]
+		return addrs, ok
+	}
 	return r.addrs, true
 }
 
 // TestNewPoolWithRegistrySize 验证注册中心路径也按 size 创建连接。
 func TestNewPoolWithRegistrySize(t *testing.T) {
 	reg := &staticRegistry{addrs: []string{"A:8080", "B:8080"}}
-	pool := NewPoolWithRegistry(3, reg)
+	pool := NewPoolWithRegistry(3, "Calculator", reg)
 
 	for _, addr := range reg.addrs {
 		if got := len(pool.pools[addr]); got != 3 {
 			t.Fatalf("地址%s的连接数: 期望3, 得到%d", addr, got)
 		}
+	}
+}
+
+// TestPool_ServiceIsolation 验证 Pool 只发现目标服务的地址，并拒绝跨服务调用。
+func TestPool_ServiceIsolation(t *testing.T) {
+	reg := &staticRegistry{services: map[string][]string{
+		"Calculator":  {"A:8080"},
+		"UserService": {"B:9090"},
+	}}
+	pool := NewPoolWithRegistry(2, "Calculator", reg)
+
+	if _, ok := pool.pools["B:9090"]; ok {
+		t.Fatal("Calculator Pool 混入了 UserService 地址")
+	}
+	if got := len(pool.pools["A:8080"]); got != 2 {
+		t.Fatalf("Calculator 连接数: 期望2, 得到%d", got)
+	}
+
+	if _, err := pool.CallAsync(context.Background(), "UserService.Get", RoundRobin, nil); err == nil {
+		t.Fatal("期望跨服务调用被拒绝")
+	}
+}
+
+// TestNewPoolWithRegistryNil 验证 nil registry 不会 panic。
+func TestNewPoolWithRegistryNil(t *testing.T) {
+	pool := NewPoolWithRegistry(1, "Calculator", nil)
+	if len(pool.addrs) != 0 {
+		t.Fatalf("期望空地址列表, 得到%v", pool.addrs)
+	}
+	if _, err := pool.CallAsync(context.Background(), "Calculator.Add", RoundRobin, nil); err == nil {
+		t.Fatal("期望没有可用服务地址错误")
 	}
 }
 

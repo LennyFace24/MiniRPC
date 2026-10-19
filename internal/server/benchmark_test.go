@@ -8,15 +8,15 @@ import (
 	"sync"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
 	framepb "mini-rpc/internal/codec/proto/framepb"
 	"mini-rpc/internal/middleware"
-	"google.golang.org/protobuf/proto"
 )
 
 // benchHandler 用于 benchmark 的服务实现（不依赖 calc，避免 import cycle）
 type benchHandler struct{}
 
-func (s *benchHandler) Add(body []byte) ([]byte, error) {
+func (s *benchHandler) Add(ctx context.Context, body []byte) ([]byte, error) {
 	if len(body) != 8 {
 		return nil, nil
 	}
@@ -184,8 +184,8 @@ func BenchmarkServer_WithMiddleware(b *testing.B) {
 	srv.RegisterService("Calc", &benchHandler{})
 
 	noopMW := middleware.Middleware(func(next middleware.HandlerFunc) middleware.HandlerFunc {
-		return func(req *framepb.MessageRequest) *framepb.MessageResponse {
-			return next(req)
+		return func(ctx context.Context, req *framepb.MessageRequest) *framepb.MessageResponse {
+			return next(ctx, req)
 		}
 	})
 	srv.Use(noopMW)

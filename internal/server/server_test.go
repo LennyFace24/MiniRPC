@@ -5,23 +5,25 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	framepb "mini-rpc/internal/codec/proto/framepb"
 	"mini-rpc/internal/middleware"
-	"google.golang.org/protobuf/proto"
 )
 
 // echoServer 是测试用的服务，方法签名符合 RegisterService 的反射要求：
-// func([]byte) ([]byte, error)
+// func(context.Context, []byte) ([]byte, error)
 // 不依赖 calc 包，避免 import cycle（calc_rpc.pb.go 反向 import 了 server/client）
 type echoServer struct{}
 
 // Add 解析 8 字节 body（两个 int32 big-endian），返回 4 字节 int32 sum
-func (s *echoServer) Add(body []byte) ([]byte, error) {
+func (s *echoServer) Add(ctx context.Context, body []byte) ([]byte, error) {
 	if len(body) != 8 {
 		return nil, errors.New("invalid body length, expected 8")
 	}
@@ -34,21 +36,39 @@ func (s *echoServer) Add(body []byte) ([]byte, error) {
 }
 
 // Echo 原样返回 body
-func (s *echoServer) Echo(body []byte) ([]byte, error) {
+func (s *echoServer) Echo(ctx context.Context, body []byte) ([]byte, error) {
 	out := make([]byte, len(body))
 	copy(out, body)
 	return out, nil
 }
 
 // Slow 模拟慢请求
-func (s *echoServer) Slow(body []byte) ([]byte, error) {
+func (s *echoServer) Slow(ctx context.Context, body []byte) ([]byte, error) {
 	time.Sleep(100 * time.Millisecond)
 	return body, nil
 }
 
 // Panic 模拟 panic
-func (s *echoServer) Panic(body []byte) ([]byte, error) {
+func (s *echoServer) Panic(ctx context.Context, body []byte) ([]byte, error) {
 	panic("test panic from Panic")
+}
+
+// ctxServer 用于验证 context deadline / trace 能真正传到业务 handler。
+type ctxServer struct{}
+
+func (s *ctxServer) Deadline(ctx context.Context, body []byte) ([]byte, error) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return []byte("none"), nil
+	}
+	return []byte(deadline.Format(time.RFC3339Nano)), nil
+}
+
+func (s *ctxServer) Trace(ctx context.Context, body []byte) ([]byte, error) {
+	if traceID, ok := ctx.Value(traceIDKey).(string); ok {
+		return []byte(traceID), nil
+	}
+	return []byte("none"), nil
 }
 
 // makeAddBody 构造 Add 方法的 body：两个 int32 的 big-endian
@@ -173,6 +193,37 @@ func TestServer_ContextDeadlineExceeded(t *testing.T) {
 	}
 }
 
+// TestServer_ContextPropagated 验证 deadline 和 trace-id 真正进入业务 handler。
+func TestServer_ContextPropagated(t *testing.T) {
+	srv := NewRPCServer()
+	srv.RegisterService("Ctx", &ctxServer{})
+
+	deadline := time.Now().Add(time.Minute)
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	ctx = context.WithValue(ctx, traceIDKey, "trace-123")
+
+	deadlineResp := srv.executeHandler(ctx, &framepb.MessageRequest{
+		FuncName: "Ctx.Deadline",
+	})
+	if deadlineResp.Error != "" {
+		t.Fatalf("Ctx.Deadline 失败: %s", deadlineResp.Error)
+	}
+	if got := string(deadlineResp.Returns); got != deadline.Format(time.RFC3339Nano) {
+		t.Fatalf("handler deadline: 期望%s, 得到%s", deadline.Format(time.RFC3339Nano), got)
+	}
+
+	traceResp := srv.executeHandler(ctx, &framepb.MessageRequest{
+		FuncName: "Ctx.Trace",
+	})
+	if traceResp.Error != "" {
+		t.Fatalf("Ctx.Trace 失败: %s", traceResp.Error)
+	}
+	if got := string(traceResp.Returns); got != "trace-123" {
+		t.Fatalf("handler trace-id: 期望trace-123, 得到%s", got)
+	}
+}
+
 // TestServer_PanicRecovery 验证 Recovery 中间件捕获 panic
 func TestServer_PanicRecovery(t *testing.T) {
 	srv := NewRPCServer()
@@ -193,17 +244,17 @@ func TestServer_MiddlewareChain(t *testing.T) {
 
 	var order []string
 	srv.Use(middleware.Middleware(func(next middleware.HandlerFunc) middleware.HandlerFunc {
-		return func(req *framepb.MessageRequest) *framepb.MessageResponse {
+		return func(ctx context.Context, req *framepb.MessageRequest) *framepb.MessageResponse {
 			order = append(order, "mw1_before")
-			resp := next(req)
+			resp := next(ctx, req)
 			order = append(order, "mw1_after")
 			return resp
 		}
 	}))
 	srv.Use(middleware.Middleware(func(next middleware.HandlerFunc) middleware.HandlerFunc {
-		return func(req *framepb.MessageRequest) *framepb.MessageResponse {
+		return func(ctx context.Context, req *framepb.MessageRequest) *framepb.MessageResponse {
 			order = append(order, "mw2_before")
-			resp := next(req)
+			resp := next(ctx, req)
 			order = append(order, "mw2_after")
 			return resp
 		}
@@ -220,6 +271,54 @@ func TestServer_MiddlewareChain(t *testing.T) {
 		if order[i] != want {
 			t.Fatalf("位置%d: 期望%s, 得到%s", i, want, order[i])
 		}
+	}
+}
+
+// TestServer_ConcurrentRegisterAndUse 验证 Start 之后并发注册/追加中间件不会产生数据竞争。
+func TestServer_ConcurrentRegisterAndUse(t *testing.T) {
+	srv := NewRPCServer()
+	srv.RegisterService("Calc", &echoServer{})
+
+	stop := make(chan struct{})
+	var reader sync.WaitGroup
+	reader.Add(1)
+	go func() {
+		defer reader.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				srv.executeHandler(context.Background(), &framepb.MessageRequest{
+					FuncName: "Calc.Add",
+					Args:     makeAddBody(1, 2),
+				})
+			}
+		}
+	}()
+
+	var writers sync.WaitGroup
+	for i := range 20 {
+		writers.Add(2)
+		go func(i int) {
+			defer writers.Done()
+			srv.RegisterService(fmt.Sprintf("Svc%d", i), &echoServer{})
+		}(i)
+		go func() {
+			defer writers.Done()
+			srv.Use(middleware.Recovery)
+		}()
+	}
+	writers.Wait()
+	close(stop)
+	reader.Wait()
+
+	resp := srv.executeHandler(context.Background(), &framepb.MessageRequest{
+		FuncName: "Svc0.Add",
+		Args:     makeAddBody(3, 4),
+	})
+	if resp.Error != "" {
+		t.Fatalf("注册后的调用失败: %s", resp.Error)
 	}
 }
 

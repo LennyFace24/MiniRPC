@@ -6,7 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math/rand"
+	"math/rand/v2"
+	"strings"
 	"sync"
 
 	"mini-rpc/pkg/registry"
@@ -19,24 +20,32 @@ const (
 )
 
 type Pool struct {
-	reg       registry.RegistryCenter
-	addrs     []string
-	pools     map[string][]*RPCClient
-	size      int
-	addrIndex int
-	connIndex map[string]int // 每个地址独立的连接轮询下标
-	mu        sync.Mutex
+	reg         registry.RegistryCenter
+	serviceName string
+	addrs       []string
+	pools       map[string][]*RPCClient
+	size        int
+	addrIndex   int
+	connIndex   map[string]int // 每个地址独立的连接轮询下标
+	mu          sync.Mutex
 }
 
 func NewPool(size int, addr string) *Pool {
+	return NewPoolForService(size, "", addr)
+}
+
+// NewPoolForService 创建绑定单个服务的连接池。
+// serviceName 非空时，CallAsync 会拒绝调用其他服务的方法。
+func NewPoolForService(size int, serviceName, addr string) *Pool {
 	if size <= 0 {
 		size = 1
 	}
 	p := &Pool{
-		addrs:     []string{addr},
-		pools:     make(map[string][]*RPCClient),
-		size:      size,
-		connIndex: make(map[string]int),
+		serviceName: serviceName,
+		addrs:       []string{addr},
+		pools:       make(map[string][]*RPCClient),
+		size:        size,
+		connIndex:   make(map[string]int),
 	}
 	pools := make([]*RPCClient, size)
 	for i := range size {
@@ -54,25 +63,35 @@ func NewPoolTLS(size int, addr string, tlsConfig *tls.Config) *Pool {
 	return p
 }
 
-func NewPoolWithRegistry(size int, reg registry.RegistryCenter) *Pool {
+func NewPoolWithRegistry(size int, serviceName string, reg registry.RegistryCenter) *Pool {
 	if size <= 0 {
 		size = 1
 	}
 	p := &Pool{
-		reg:       reg,
-		addrs:     make([]string, 0),
-		pools:     make(map[string][]*RPCClient),
-		size:      size,
-		connIndex: make(map[string]int),
+		reg:         reg,
+		serviceName: serviceName,
+		addrs:       make([]string, 0),
+		pools:       make(map[string][]*RPCClient),
+		size:        size,
+		connIndex:   make(map[string]int),
 	}
 	p.refresh()
 	return p
 }
 
 func (p *Pool) refresh() {
-	addrs, ok := p.reg.Discover("Calculator")
+	if p.reg == nil {
+		log.Printf("[pool.go]registry 为 nil")
+		return
+	}
+	if p.serviceName == "" {
+		log.Printf("[pool.go]serviceName 为空，跳过服务发现")
+		return
+	}
+
+	addrs, ok := p.reg.Discover(p.serviceName)
 	if !ok {
-		log.Printf("[pool.go]服务发现失败")
+		log.Printf("[pool.go]服务发现失败: %s", p.serviceName)
 		return
 	}
 	p.mu.Lock()
@@ -107,7 +126,7 @@ func (p *Pool) refresh() {
 	}
 
 	p.addrs = addrs
-	log.Printf("[pool.go]发现服务地址:%v", addrs)
+	log.Printf("[pool.go]发现服务%s地址:%v", p.serviceName, addrs)
 }
 
 func (p *Pool) pickAddr(mode int) string {
@@ -138,7 +157,7 @@ func (p *Pool) pickAddr(mode int) string {
 		}
 		return minAddr
 	case Random:
-		return p.addrs[rand.Intn(len(p.addrs))]
+		return p.addrs[rand.IntN(len(p.addrs))]
 	}
 	return p.addrs[0]
 }
@@ -170,7 +189,7 @@ func (p *Pool) pickConn(addr string, mode int) *RPCClient {
 		}
 		return min
 	case Random:
-		return conns[rand.Intn(len(conns))]
+		return conns[rand.IntN(len(conns))]
 	}
 	return conns[0]
 }
@@ -179,6 +198,10 @@ func (p *Pool) pickConn(addr string, mode int) *RPCClient {
 // 返回 (*Future, error)：地址不可用 / 发送失败时 future=nil, err 非 nil。
 // 调用方应用 ctx 控制超时：future.Get(ctx)。
 func (p *Pool) CallAsync(ctx context.Context, funcname string, mode int, body []byte) (*Future, error) {
+	if p.serviceName != "" && !strings.HasPrefix(funcname, p.serviceName+".") {
+		return nil, fmt.Errorf("[pool.go]服务不匹配: 连接池服务=%s, 调用=%s", p.serviceName, funcname)
+	}
+
 	addr := p.pickAddr(mode)
 	if addr == "" {
 		return nil, errors.New("[pool.go]没有可用服务地址")

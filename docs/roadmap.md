@@ -39,10 +39,10 @@
 - 生成 Server 接口 + Wrapper + RegisterCalculatorServer
 - 负载均衡生效（RoundRobin 策略）
 
-#### 5.3 Context deadline 透传
+#### 5.3 Context deadline 透传 ✅
 - client 端提取 deadline → 塞进 MessageRequest.Metadata
-- server 端重建 ctx → 调用前超时检查
-- handler 内部完整 ctx 透传待完善
+- server 端重建 ctx → 传给中间件和 handler
+- handler 可通过 ctx.Done / ctx.Err 感知超时
 
 ## 进行中 / 待完成阶段
 
@@ -60,15 +60,15 @@
 
 ### Phase 7 — 服务发现
 
-#### 7.1 注册中心抽象
-- 定义 `Registry` 接口：`Register(service, addr) error` + `Discover(service) ([]string, error)`
-- 实现静态注册（读取配置文件）
-- 实现简单的 etcd / consul 注册（可选）
+#### 7.1 注册中心抽象 ✅（基础接口）
+- 定义 `RegistryCenter` 接口：`Register(service, addr)` + `Discover(service) ([]string, bool)`
+- 实现静态注册（读取按 service 分组的 address.json）
+- 实现简单的 etcd / consul 注册（可选，未做）
 
-#### 7.2 客户端自动发现
-- client 或 pool 不再硬编码地址，改为 `Discover` 获取地址列表
-- 定时刷新，感知节点上下线
-- 配合负载均衡策略使用
+#### 7.2 客户端自动发现 ✅（基础隔离）
+- Pool 按 `serviceName` 调用 `Discover`，不再硬编码 `"Calculator"`
+- 每个 Pool 只持有同一服务的副本地址
+- 定时刷新 / 节点上下线感知待完善
 
 ### Phase 8 — CLI 工具（可选）
 - 实现 `mini-rpc-cli` 命令行

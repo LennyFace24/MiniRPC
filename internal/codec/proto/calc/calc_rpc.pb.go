@@ -4,9 +4,10 @@ package calc
 
 import (
 	"context"
+	"google.golang.org/protobuf/proto"
 	"mini-rpc/internal/client"
 	"mini-rpc/internal/server"
-	"google.golang.org/protobuf/proto"
+	"mini-rpc/pkg/registry"
 )
 
 type CalculatorClient struct {
@@ -14,7 +15,11 @@ type CalculatorClient struct {
 }
 
 func NewCalculatorClient(addr string) *CalculatorClient {
-	return &CalculatorClient{pool: client.NewPool(1, addr)}
+	return &CalculatorClient{pool: client.NewPoolForService(1, "Calculator", addr)}
+}
+
+func NewCalculatorClientWithRegistry(reg registry.RegistryCenter) *CalculatorClient {
+	return &CalculatorClient{pool: client.NewPoolWithRegistry(1, "Calculator", reg)}
 }
 
 func (c *CalculatorClient) Add(ctx context.Context, req *CalcReq) (*CalcRsp, error) {
@@ -46,13 +51,13 @@ type CalculatorServerWrapper struct {
 	Srv CalculatorServer
 }
 
-func (w *CalculatorServerWrapper) Add(body []byte) ([]byte, error) {
+func (w *CalculatorServerWrapper) Add(ctx context.Context, body []byte) ([]byte, error) {
 	var req CalcReq
 	err := proto.Unmarshal(body, &req)
 	if err != nil {
 		return nil, err
 	}
-	rsp, err := w.Srv.Add(context.Background(), &req)
+	rsp, err := w.Srv.Add(ctx, &req)
 	if err != nil {
 		return nil, err
 	}

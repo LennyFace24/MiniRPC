@@ -3,6 +3,7 @@ package transport
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
 	"sync"
@@ -180,6 +181,44 @@ func TestSendToServer_ClosedConn(t *testing.T) {
 	err := SendToServer(1, clientConn, &framepb.MessageRequest{FuncName: "x"})
 	if err == nil {
 		t.Fatal("期望发送错误, 但未返回")
+	}
+}
+
+type shortWriteConn struct {
+	net.Conn
+}
+
+func (c shortWriteConn) Write(p []byte) (int, error) {
+	return len(p) - 1, nil
+}
+
+func TestSendToServer_BodyTooLarge(t *testing.T) {
+	body := make([]byte, protocol.MaxFrameSize+1)
+	err := SendToServer(1, shortWriteConn{}, &framepb.MessageRequest{Args: body})
+	if err == nil {
+		t.Fatal("期望消息体过大错误")
+	}
+}
+
+func TestSendToClient_BodyTooLarge(t *testing.T) {
+	body := make([]byte, protocol.MaxFrameSize+1)
+	err := SendToClient(1, shortWriteConn{}, &framepb.MessageResponse{Returns: body})
+	if err == nil {
+		t.Fatal("期望消息体过大错误")
+	}
+}
+
+func TestSendToServer_ShortWrite(t *testing.T) {
+	err := SendToServer(1, shortWriteConn{}, &framepb.MessageRequest{FuncName: "x"})
+	if !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("期望 io.ErrShortWrite, 得到%v", err)
+	}
+}
+
+func TestSendToClient_ShortWrite(t *testing.T) {
+	err := SendToClient(1, shortWriteConn{}, &framepb.MessageResponse{Returns: []byte("x")})
+	if !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("期望 io.ErrShortWrite, 得到%v", err)
 	}
 }
 

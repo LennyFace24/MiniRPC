@@ -18,6 +18,10 @@ func NewPool(size int, addr string) *client.Pool {
 	return client.NewPool(size, addr)
 }
 
-func NewPoolWithRegistry(size int, registry registry.RegistryCenter) *client.Pool {
-	return client.NewPoolWithRegistry(size, registry)
+func NewPoolForService(size int, serviceName, addr string) *client.Pool {
+	return client.NewPoolForService(size, serviceName, addr)
+}
+
+func NewPoolWithRegistry(size int, serviceName string, registry registry.RegistryCenter) *client.Pool {
+	return client.NewPoolWithRegistry(size, serviceName, registry)
 }

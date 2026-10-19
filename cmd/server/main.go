@@ -27,6 +27,7 @@ func main() {
 		log.Fatalf("[cmd/server]启动监听失败:%v", err)
 	}
 	log.Println("[cmd/server]mini-rpc 服务启动, 端口:8080")
-	server.Start(listener)
-
+	if err := server.Start(listener); err != nil {
+		log.Fatalf("[cmd/server]服务退出:%v", err)
+	}
 }

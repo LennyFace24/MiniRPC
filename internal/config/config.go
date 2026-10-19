@@ -15,29 +15,38 @@ type Config struct {
 	} `yaml:"server"`
 }
 
-var config *Config
-var once sync.Once
+var (
+	config *Config
+	mu     sync.Mutex
+)
 
 func LoadConfig() *Config {
-	once.Do(func() {
-		// 从配置文件中加载配置
-		bytes, err := os.ReadFile("config.yaml")
+	mu.Lock()
+	defer mu.Unlock()
 
-		if err != nil {
-			log.Default().Printf("[config.go]读取配置文件错误:%v", err)
-			return
-		}
-		// 解析
-		err = yaml.Unmarshal(bytes, &config)
-		if err != nil {
-			log.Default().Printf("[config.go]解析配置文件错误:%v", err)
-			return
-		}
-	})
+	if config != nil {
+		return config
+	}
 
+	// 从配置文件中加载配置；失败不缓存 nil，下一次调用可以重试。
+	data, err := os.ReadFile("config.yaml")
+	if err != nil {
+		log.Printf("[config.go]读取配置文件错误:%v", err)
+		return nil
+	}
+
+	var cfg Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		log.Printf("[config.go]解析配置文件错误:%v", err)
+		return nil
+	}
+
+	config = &cfg
 	return config
 }
 
 func GetConfig() *Config {
+	mu.Lock()
+	defer mu.Unlock()
 	return config
 }

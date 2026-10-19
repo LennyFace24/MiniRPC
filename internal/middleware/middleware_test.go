@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -10,9 +11,9 @@ import (
 // recordingMiddleware 返回一个中间件，记录 before/after 的执行顺序
 func recordingMiddleware(name string, order *[]string) Middleware {
 	return func(next HandlerFunc) HandlerFunc {
-		return func(req *framepb.MessageRequest) *framepb.MessageResponse {
+		return func(ctx context.Context, req *framepb.MessageRequest) *framepb.MessageResponse {
 			*order = append(*order, name+"_before")
-			resp := next(req)
+			resp := next(ctx, req)
 			*order = append(*order, name+"_after")
 			return resp
 		}
@@ -27,7 +28,7 @@ func TestMiddlewareChain_Order(t *testing.T) {
 	mw1 := recordingMiddleware("mw1", &order)
 	mw2 := recordingMiddleware("mw2", &order)
 
-	base := HandlerFunc(func(req *framepb.MessageRequest) *framepb.MessageResponse {
+	base := HandlerFunc(func(ctx context.Context, req *framepb.MessageRequest) *framepb.MessageResponse {
 		order = append(order, "handler")
 		return &framepb.MessageResponse{Returns: []byte("ok")}
 	})
@@ -38,7 +39,7 @@ func TestMiddlewareChain_Order(t *testing.T) {
 	handler = mw1(handler) // mw1(base)
 	handler = mw2(handler) // mw2(mw1(base))
 
-	resp := handler(&framepb.MessageRequest{FuncName: "test"})
+	resp := handler(context.Background(), &framepb.MessageRequest{FuncName: "test"})
 
 	if string(resp.Returns) != "ok" {
 		t.Fatalf("返回值: 期望'ok', 得到'%s'", resp.Returns)
@@ -64,7 +65,7 @@ func TestMiddlewareChain_RegistrationOrder(t *testing.T) {
 			"A": recordingMiddleware("A", &order),
 			"B": recordingMiddleware("B", &order),
 		}
-		base := HandlerFunc(func(req *framepb.MessageRequest) *framepb.MessageResponse {
+		base := HandlerFunc(func(ctx context.Context, req *framepb.MessageRequest) *framepb.MessageResponse {
 			order = append(order, "handler")
 			return &framepb.MessageResponse{}
 		})
@@ -72,7 +73,7 @@ func TestMiddlewareChain_RegistrationOrder(t *testing.T) {
 		for _, name := range regOrder {
 			handler = mws[name](handler)
 		}
-		handler(&framepb.MessageRequest{})
+		handler(context.Background(), &framepb.MessageRequest{})
 		return order
 	}
 
@@ -104,12 +105,12 @@ func TestMiddlewareChain_RegistrationOrder(t *testing.T) {
 
 // TestRecoveryMiddleware_Panic 验证 panic 被捕获并转为 error 响应
 func TestRecoveryMiddleware_Panic(t *testing.T) {
-	base := HandlerFunc(func(req *framepb.MessageRequest) *framepb.MessageResponse {
+	base := HandlerFunc(func(ctx context.Context, req *framepb.MessageRequest) *framepb.MessageResponse {
 		panic("test panic")
 	})
 	handler := Recovery(base)
 
-	resp := handler(&framepb.MessageRequest{FuncName: "test"})
+	resp := handler(context.Background(), &framepb.MessageRequest{FuncName: "test"})
 
 	if resp == nil {
 		t.Fatal("期望非nil响应, 但得到nil")
@@ -125,12 +126,12 @@ func TestRecoveryMiddleware_Panic(t *testing.T) {
 // TestRecoveryMiddleware_PanicWithStruct 验证 panic 各种类型都能被捕获
 func TestRecoveryMiddleware_PanicWithStruct(t *testing.T) {
 	type customError struct{ msg string }
-	base := HandlerFunc(func(req *framepb.MessageRequest) *framepb.MessageResponse {
+	base := HandlerFunc(func(ctx context.Context, req *framepb.MessageRequest) *framepb.MessageResponse {
 		panic(customError{msg: "custom panic"})
 	})
 	handler := Recovery(base)
 
-	resp := handler(&framepb.MessageRequest{})
+	resp := handler(context.Background(), &framepb.MessageRequest{})
 	if resp.Error == "" {
 		t.Fatal("期望错误信息, 但没有")
 	}
@@ -138,12 +139,12 @@ func TestRecoveryMiddleware_PanicWithStruct(t *testing.T) {
 
 // TestRecoveryMiddleware_Normal 验证正常请求不被中间件影响
 func TestRecoveryMiddleware_Normal(t *testing.T) {
-	base := HandlerFunc(func(req *framepb.MessageRequest) *framepb.MessageResponse {
+	base := HandlerFunc(func(ctx context.Context, req *framepb.MessageRequest) *framepb.MessageResponse {
 		return &framepb.MessageResponse{Returns: []byte("ok")}
 	})
 	handler := Recovery(base)
 
-	resp := handler(&framepb.MessageRequest{FuncName: "test"})
+	resp := handler(context.Background(), &framepb.MessageRequest{FuncName: "test"})
 	if resp.Error != "" {
 		t.Fatalf("期望无错误, 得到:%s", resp.Error)
 	}
@@ -154,7 +155,7 @@ func TestRecoveryMiddleware_Normal(t *testing.T) {
 
 // TestRecoveryMiddleware_NilPanic 验证 panic(nil) 边界情况
 func TestRecoveryMiddleware_NilPanic(t *testing.T) {
-	base := HandlerFunc(func(req *framepb.MessageRequest) *framepb.MessageResponse {
+	base := HandlerFunc(func(ctx context.Context, req *framepb.MessageRequest) *framepb.MessageResponse {
 		panic(nil)
 	})
 	handler := Recovery(base)
@@ -164,7 +165,7 @@ func TestRecoveryMiddleware_NilPanic(t *testing.T) {
 			t.Fatalf("Recovery 应捕获 panic(nil), 但逃逸了: %v", r)
 		}
 	}()
-	resp := handler(&framepb.MessageRequest{})
+	resp := handler(context.Background(), &framepb.MessageRequest{})
 	if resp == nil {
 		t.Fatal("期望非nil响应")
 	}
@@ -172,10 +173,10 @@ func TestRecoveryMiddleware_NilPanic(t *testing.T) {
 
 // TestEmptyMiddlewareChain 验证无中间件时 handler 直接执行
 func TestEmptyMiddlewareChain(t *testing.T) {
-	base := HandlerFunc(func(req *framepb.MessageRequest) *framepb.MessageResponse {
+	base := HandlerFunc(func(ctx context.Context, req *framepb.MessageRequest) *framepb.MessageResponse {
 		return &framepb.MessageResponse{Returns: []byte("direct")}
 	})
-	resp := base(&framepb.MessageRequest{FuncName: "test"})
+	resp := base(context.Background(), &framepb.MessageRequest{FuncName: "test"})
 	if string(resp.Returns) != "direct" {
 		t.Fatalf("期望'direct', 得到%s", resp.Returns)
 	}
@@ -183,12 +184,12 @@ func TestEmptyMiddlewareChain(t *testing.T) {
 
 // TestLoggerMiddleware 验证 Logger 中间件透传请求和响应
 func TestLoggerMiddleware(t *testing.T) {
-	base := HandlerFunc(func(req *framepb.MessageRequest) *framepb.MessageResponse {
+	base := HandlerFunc(func(ctx context.Context, req *framepb.MessageRequest) *framepb.MessageResponse {
 		return &framepb.MessageResponse{Returns: []byte("logged")}
 	})
 	handler := Logger(base)
 
-	resp := handler(&framepb.MessageRequest{FuncName: "Svc.M"})
+	resp := handler(context.Background(), &framepb.MessageRequest{FuncName: "Svc.M"})
 	if resp == nil {
 		t.Fatal("期望非nil响应")
 	}
@@ -199,14 +200,14 @@ func TestLoggerMiddleware(t *testing.T) {
 
 // TestLoggerMiddleware_WithPanic 验证 Logger 与 Recovery 组合时 panic 不影响 Logger
 func TestLoggerMiddleware_WithPanic(t *testing.T) {
-	base := HandlerFunc(func(req *framepb.MessageRequest) *framepb.MessageResponse {
+	base := HandlerFunc(func(ctx context.Context, req *framepb.MessageRequest) *framepb.MessageResponse {
 		panic("oops")
 	})
 	// 模拟 server 组装：注册 [Logger, Recovery] → Recovery 在最外层
 	handler := Logger(base)
 	handler = Recovery(handler)
 
-	resp := handler(&framepb.MessageRequest{FuncName: "test"})
+	resp := handler(context.Background(), &framepb.MessageRequest{FuncName: "test"})
 	if resp == nil || resp.Error == "" {
 		t.Fatal("期望 panic 被捕获并返回 error 响应")
 	}
@@ -215,14 +216,14 @@ func TestLoggerMiddleware_WithPanic(t *testing.T) {
 // BenchmarkRecoveryMiddleware Recovery 中间件性能（无 panic 路径）
 func BenchmarkRecoveryMiddleware(b *testing.B) {
 	b.ReportAllocs()
-	base := HandlerFunc(func(req *framepb.MessageRequest) *framepb.MessageResponse {
+	base := HandlerFunc(func(ctx context.Context, req *framepb.MessageRequest) *framepb.MessageResponse {
 		return &framepb.MessageResponse{Returns: []byte("ok")}
 	})
 	handler := Recovery(base)
 	req := &framepb.MessageRequest{FuncName: "Svc.M"}
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		handler(req)
+	for range b.N {
+		handler(context.Background(), req)
 	}
 }
 
@@ -232,15 +233,15 @@ func BenchmarkMiddlewareChain(b *testing.B) {
 	var order []string
 	mw1 := recordingMiddleware("mw1", &order)
 	mw2 := recordingMiddleware("mw2", &order)
-	base := HandlerFunc(func(req *framepb.MessageRequest) *framepb.MessageResponse {
+	base := HandlerFunc(func(ctx context.Context, req *framepb.MessageRequest) *framepb.MessageResponse {
 		return &framepb.MessageResponse{Returns: []byte("ok")}
 	})
 	handler := mw1(base)
 	handler = mw2(handler)
 	req := &framepb.MessageRequest{FuncName: "Svc.M"}
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		handler(req)
+	for range b.N {
+		handler(context.Background(), req)
 		// 每次清空，避免 order 无限增长影响内存测量
 		order = order[:0]
 	}

@@ -71,17 +71,28 @@ func ReadAndDeserialize(conn net.Conn) (*framepb.MessageRequest, uint64, error) 
 	return &requestData, requestID, nil
 }
 
+func sendFrame(conn net.Conn, requestID uint64, body []byte) error {
+	if len(body) > protocol.MaxFrameSize {
+		return fmt.Errorf("[transport.go]消息体过大:%d", len(body))
+	}
+
+	protocol.AddHeadersBeforeBytes(requestID, &body)
+	n, err := conn.Write(body)
+	if err != nil {
+		return fmt.Errorf("[transport.go]发送数据错误:%w", err)
+	}
+	if n != len(body) {
+		return fmt.Errorf("[transport.go]发送数据不完整:%w", io.ErrShortWrite)
+	}
+	return nil
+}
+
 func SendToClient(requestId uint64, conn net.Conn, res *framepb.MessageResponse) error {
 	bytes, err := proto.Marshal(res)
 	if err != nil {
 		return fmt.Errorf("[transport.go]序列化错误:%v", err)
 	}
-	protocol.AddHeadersBeforeBytes(requestId, &bytes)
-	_, err = conn.Write(bytes)
-	if err != nil {
-		return fmt.Errorf("[transport.go]发送数据错误:%v", err)
-	}
-	return nil
+	return sendFrame(conn, requestId, bytes)
 }
 
 func SendToServer(requestId uint64, conn net.Conn, req *framepb.MessageRequest) error {
@@ -89,11 +100,5 @@ func SendToServer(requestId uint64, conn net.Conn, req *framepb.MessageRequest) 
 	if err != nil {
 		return fmt.Errorf("[transport.go]序列化错误:%w", err)
 	}
-	protocol.AddHeadersBeforeBytes(requestId, &bytes)
-
-	_, err = conn.Write(bytes)
-	if err != nil {
-		return fmt.Errorf("[transport.go]发送数据错误:%w", err)
-	}
-	return nil
+	return sendFrame(conn, requestId, bytes)
 }

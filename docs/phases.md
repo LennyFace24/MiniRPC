@@ -31,7 +31,7 @@
 - 避免单连接瓶颈，提升吞吐
 
 ### 4.4 超时控制 ✅
-- context deadline 通过 metadata 透传，服务端调用前校验；CallAsync 支持超时
+- context deadline 通过 metadata 透传，服务端重建 ctx 并传给中间件 / handler；CallAsync 支持超时
 
 ### 4.5 Protobuf 支持 ✅
 - 传输层直接使用 Protobuf MessageRequest / MessageResponse

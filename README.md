@@ -52,7 +52,7 @@ MiniRPC 提供客户端、服务端、连接池、异步调用、请求多路复
 │   ├── registry/             # 服务注册与发现接口
 │   └── rpc/                  # 对外暴露的 RPC 创建入口
 ├── config.yaml              # 默认服务端配置
-├── address.json             # 示例服务地址列表
+├── address.json             # 按服务分组的示例地址列表
 ├── docs/                    # 开发规划和设计文档
 ├── go.mod
 └── go.sum
@@ -193,7 +193,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	server.Start(listener)
+	if err := server.Start(listener); err != nil {
+		log.Fatal(err)
+	}
 }
 ```
 
@@ -321,6 +323,8 @@ protoc \
 - Server Wrapper
 - `Register<Service>Server` 注册函数
 
+生成的客户端会绑定 serviceName，Pool 只会在该服务的副本地址之间做负载均衡；同时生成 `New<Service>ClientWithRegistry`，可直接接入注册中心。
+
 生成的客户端调用会自动完成：
 
 1. Protobuf 序列化
@@ -347,10 +351,14 @@ client := client.NewRPCClientWithAddr("localhost:8080")
 示例服务地址列表位于 `address.json`：
 
 ```json
-[
-  "localhost:8080"
-]
+{
+  "Calculator": [
+    "localhost:8080"
+  ]
+}
 ```
+
+`Pool` 按 `serviceName` 隔离，地址列表只返回目标服务的副本。
 
 ## 服务注册与发现
 
@@ -366,7 +374,7 @@ type RegistryCenter interface {
 使用自定义注册中心创建连接池：
 
 ```go
-pool := rpc.NewPoolWithRegistry(1, registry)
+pool := rpc.NewPoolWithRegistry(1, "Calculator", registry)
 ```
 
 当前仓库主要提供接口和静态地址示例，后续可以接入 etcd、Consul 等服务发现组件。
@@ -405,11 +413,13 @@ calc.RegisterCalculatorServer(
 	&CalculatorServer{},
 )
 
-server.ServeTLS(
+if err := server.ServeTLS(
 	":8443",
 	"server.crt",
 	"server.key",
-)
+); err != nil {
+	log.Fatal(err)
+}
 ```
 
 客户端连接池支持传入 TLS 配置：
@@ -436,7 +446,7 @@ defer cancel()
 rsp, err := client.Add(ctx, req)
 ```
 
-客户端会将 deadline 写入 RPC metadata，服务端解析后进行超时检查。
+客户端会将 deadline 写入 RPC metadata，服务端解析后创建带 deadline 的 ctx，并传给中间件和 handler；handler 可以通过 `ctx.Done()` / `ctx.Err()` 感知超时。
 
 ## 当前限制
 

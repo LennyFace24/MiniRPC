@@ -6,33 +6,27 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sync"
 	"time"
 
 	calc "mini-rpc/internal/codec/proto/calc"
 )
 
-type StaticReg struct {
-	once       sync.Once
-	serviceMap map[string][]string // 每个服务对应的地址
-}
+type StaticReg struct{}
 
-func (r *StaticReg) Register(serviceName string, address string) {
+func (r *StaticReg) Register(serviceName string, address string) {}
 
-}
-
-// 服务发现,在服务列表更新时进行重新发现
+// 服务发现：address.json 按 serviceName 分组，避免把不同服务的地址混进同一个 Pool。
 func (r *StaticReg) Discover(serviceName string) ([]string, bool) {
-	var addrs []string
+	var services map[string][]string
 	file, err := os.ReadFile("address.json")
 	if err != nil {
 		log.Fatalf("[cmd/client]读取配置文件失败:%v", err)
 	}
-	err = json.Unmarshal(file, &addrs)
-	if err != nil {
+	if err := json.Unmarshal(file, &services); err != nil {
 		log.Fatalf("[cmd/client]解析配置文件失败:%v", err)
 	}
-	return addrs, true
+	addrs, ok := services[serviceName]
+	return addrs, ok
 }
 
 func main() {

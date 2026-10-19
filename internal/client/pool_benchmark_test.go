@@ -13,7 +13,7 @@ import (
 // benchPoolHandler 用于 benchmark 的服务实现（不依赖 calc，避免 import cycle）
 type benchPoolHandler struct{}
 
-func (s *benchPoolHandler) Add(body []byte) ([]byte, error) {
+func (s *benchPoolHandler) Add(ctx context.Context, body []byte) ([]byte, error) {
 	if len(body) != 8 {
 		return nil, nil
 	}

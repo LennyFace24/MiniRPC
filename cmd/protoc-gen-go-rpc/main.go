@@ -7,18 +7,18 @@ import (
 func main() {
 	protogen.Options{}.Run(func(gen *protogen.Plugin) error {
 		for _, f := range gen.Files {
-			if !f.Generate {
+			if !f.Generate || len(f.Services) == 0 {
 				continue
 			}
-			for _, svc := range f.Services {
-				generateFile(gen, f, svc)
-			}
+			generateFile(gen, f)
 		}
 		return nil
 	})
 }
 
-func generateFile(gen *protogen.Plugin, f *protogen.File, svc *protogen.Service) {
+// generateFile 为每个 proto 文件生成一个 _rpc.pb.go，
+// 文件内可以包含多个 service，避免重复创建同名文件。
+func generateFile(gen *protogen.Plugin, f *protogen.File) {
 	filename := f.GeneratedFilenamePrefix + "_rpc.pb.go"
 	g := gen.NewGeneratedFile(filename, f.GoImportPath)
 
@@ -28,13 +28,16 @@ func generateFile(gen *protogen.Plugin, f *protogen.File, svc *protogen.Service)
 	g.P()
 
 	generateImports(g)
-	generateClient(g, svc)
-	g.P()
-	generateServerInterface(g, svc)
-	g.P()
-	generateServerWrapper(g, svc)
-	g.P()
-	generateRegister(g, svc)
+	for _, svc := range f.Services {
+		generateClient(g, svc)
+		g.P()
+		generateServerInterface(g, svc)
+		g.P()
+		generateServerWrapper(g, svc)
+		g.P()
+		generateRegister(g, svc)
+		g.P()
+	}
 }
 
 func generateImports(g *protogen.GeneratedFile) {
@@ -42,6 +45,7 @@ func generateImports(g *protogen.GeneratedFile) {
 	g.P(`	"context"`)
 	g.P(`	"mini-rpc/internal/client"`)
 	g.P(`	"mini-rpc/internal/server"`)
+	g.P(`	"mini-rpc/pkg/registry"`)
 	g.P(`	"google.golang.org/protobuf/proto"`)
 	g.P(")")
 }
@@ -54,7 +58,11 @@ func generateClient(g *protogen.GeneratedFile, svc *protogen.Service) {
 	g.P("}")
 	g.P()
 	g.P("func New", clientName, "(addr string) *", clientName, " {")
-	g.P("	return &", clientName, "{pool: client.NewPool(1, addr)}")
+	g.P("	return &", clientName, "{pool: client.NewPoolForService(1, \"", serviceName, "\", addr)}")
+	g.P("}")
+	g.P()
+	g.P("func New", clientName, "WithRegistry(reg registry.RegistryCenter) *", clientName, " {")
+	g.P("	return &", clientName, "{pool: client.NewPoolWithRegistry(1, \"", serviceName, "\", reg)}")
 	g.P("}")
 	g.P()
 
@@ -109,15 +117,14 @@ func generateServerWrapper(g *protogen.GeneratedFile, svc *protogen.Service) {
 
 	for _, method := range svc.Methods {
 		inputType := method.Input.GoIdent
-		// outputType := method.Output.GoIdent
 
-		g.P("func (w *", wrapperName, ") ", method.GoName, "(body []byte) ([]byte, error) {")
+		g.P("func (w *", wrapperName, ") ", method.GoName, "(ctx context.Context, body []byte) ([]byte, error) {")
 		g.P("	var req ", inputType)
 		g.P("	err := proto.Unmarshal(body, &req)")
 		g.P("	if err != nil {")
 		g.P("		return nil, err")
 		g.P("	}")
-		g.P("	rsp, err := w.Srv.", method.GoName, "(context.Background(), &req)")
+		g.P("	rsp, err := w.Srv.", method.GoName, "(ctx, &req)")
 		g.P("	if err != nil {")
 		g.P("		return nil, err")
 		g.P("	}")

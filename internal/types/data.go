@@ -1,5 +1,7 @@
 package types
 
+import "context"
+
 type ServiceDesc struct {
 	ServiceName string
 	Methods     map[string]*MethodDesc
@@ -7,5 +9,5 @@ type ServiceDesc struct {
 
 type MethodDesc struct {
 	MethodName string
-	Handler    func(body []byte) ([]byte, error)
+	Handler    func(ctx context.Context, body []byte) ([]byte, error)
 }

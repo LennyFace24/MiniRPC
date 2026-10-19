@@ -1,3 +1,5 @@
-[
+{
+  "Calculator": [
     "localhost:8080"
-]
+  ]
+}
