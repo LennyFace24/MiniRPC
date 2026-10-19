@@ -21,6 +21,10 @@ func NewCalculatorClientWithRegistry(reg registry.RegistryCenter) *CalculatorCli
 	return &CalculatorClient{pool: rpc.NewPoolWithRegistry(1, "Calculator", reg)}
 }
 
+func NewCalculatorClientWithPool(pool *rpc.Pool) *CalculatorClient {
+	return &CalculatorClient{pool: pool}
+}
+
 func (c *CalculatorClient) Close() error {
 	return c.pool.Close()
 }
