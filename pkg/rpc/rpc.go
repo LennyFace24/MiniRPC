@@ -1,6 +1,8 @@
 package rpc
 
 import (
+	"crypto/tls"
+
 	"mini-rpc/internal/client"
 	"mini-rpc/internal/server"
 	"mini-rpc/pkg/registry"
@@ -42,6 +44,14 @@ func NewPool(size int, addr string) *Pool {
 
 func NewPoolForService(size int, serviceName, addr string) *Pool {
 	return client.NewPoolForService(size, serviceName, addr)
+}
+
+func NewPoolTLS(size int, addr string, tlsConfig *tls.Config) *Pool {
+	return client.NewPoolTLS(size, addr, tlsConfig)
+}
+
+func NewPoolTLSForService(size int, serviceName, addr string, tlsConfig *tls.Config) *Pool {
+	return client.NewPoolTLSForService(size, serviceName, addr, tlsConfig)
 }
 
 func NewPoolWithRegistry(size int, serviceName string, reg registry.RegistryCenter) *Pool {
