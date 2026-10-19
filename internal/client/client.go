@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	framepb "mini-rpc/internal/codec/proto/framepb"
 	"mini-rpc/internal/config"
@@ -20,6 +21,14 @@ import (
 
 	"google.golang.org/protobuf/proto"
 )
+
+const (
+	defaultDialTimeout  = 3 * time.Second
+	defaultWriteTimeout = 10 * time.Second
+	defaultMaxInflight  = 1024
+)
+
+var errClientClosed = errors.New("[client.go]client 已关闭")
 
 // pendingCall 表示一个在途请求。
 // gen 记录请求注册时所属的连接代际，断线/重连时只清理同一代际的请求，
@@ -31,16 +40,21 @@ type pendingCall struct {
 
 // RPCClient 是一个长连接的 RPC 客户端，支持多路复用和自动重连。
 type RPCClient struct {
-	addr      string // 显式地址；为空时回退到 config.yaml
-	tlsConfig *tls.Config
+	addr         string // 显式地址；为空时回退到 config.yaml
+	tlsConfig    *tls.Config
+	dialTimeout  time.Duration
+	writeTimeout time.Duration
+	slots        chan struct{} // 应用层背压：限制单连接最大在途请求数
 
-	mu       sync.Mutex
-	conn     net.Conn
-	gen      uint64 // 连接代际，每次 dial 成功递增
-	closed   bool
-	pending  map[uint64]*pendingCall
-	nextID   uint64
-	inflight atomic.Int64 // 在途请求数，供 LeastConnections 使用
+	mu         sync.Mutex
+	conn       net.Conn
+	gen        uint64 // 连接代际，每次 dial 成功递增
+	closed     bool
+	dialing    chan struct{} // 非 nil 表示有 goroutine 正在 dial
+	dialCancel context.CancelFunc
+	pending    map[uint64]*pendingCall
+	nextID     uint64
+	inflight   atomic.Int64 // 在途请求数，供 LeastConnections 使用
 
 	writeMu sync.Mutex // 串行化 conn.Write，避免并发写导致帧交错
 }
@@ -70,8 +84,11 @@ func (f *Future) Get(ctx context.Context) ([]byte, error) {
 
 func NewRPCClient() *RPCClient {
 	return &RPCClient{
-		nextID:  1,
-		pending: make(map[uint64]*pendingCall),
+		nextID:       1,
+		pending:      make(map[uint64]*pendingCall),
+		dialTimeout:  defaultDialTimeout,
+		writeTimeout: defaultWriteTimeout,
+		slots:        make(chan struct{}, defaultMaxInflight),
 	}
 }
 
@@ -88,9 +105,14 @@ func (c *RPCClient) Close() error {
 	c.closed = true
 	conn := c.conn
 	c.conn = nil
+	cancel := c.dialCancel
+	c.dialCancel = nil
 	c.mu.Unlock()
 
-	c.failAllPending(errors.New("[client.go]client 已关闭"))
+	if cancel != nil {
+		cancel()
+	}
+	c.failAllPending(errClientClosed)
 
 	if conn != nil {
 		return conn.Close()
@@ -98,46 +120,102 @@ func (c *RPCClient) Close() error {
 	return nil
 }
 
-// dial 建立新连接并启动 readLoop。调用方必须持锁或确保不被并发调用。
-func (c *RPCClient) dial() error {
-	var address string
+func (c *RPCClient) address() (string, error) {
 	if c.addr != "" {
-		address = c.addr
-	} else {
-		cfg := config.LoadConfig()
-		if cfg == nil {
-			return errors.New("[client.go]加载配置文件失败")
-		}
-		address = net.JoinHostPort(cfg.Server.URL, strconv.Itoa(cfg.Server.Port))
+		return c.addr, nil
 	}
+	cfg := config.LoadConfig()
+	if cfg == nil {
+		return "", errors.New("[client.go]加载配置文件失败")
+	}
+	return net.JoinHostPort(cfg.Server.URL, strconv.Itoa(cfg.Server.Port)), nil
+}
+
+// dial 建立新连接并启动 readLoop。调用方不能持有 c.mu，且同一时刻只能有一个 dial。
+func (c *RPCClient) dial(ctx context.Context) error {
+	address, err := c.address()
+	if err != nil {
+		return err
+	}
+
+	dialer := &net.Dialer{Timeout: c.dialTimeout}
 	var conn net.Conn
-	var err error
 	if c.tlsConfig != nil {
-		conn, err = tls.Dial("tcp", address, c.tlsConfig)
+		tlsDialer := &tls.Dialer{
+			NetDialer: dialer,
+			Config:    c.tlsConfig,
+		}
+		conn, err = tlsDialer.DialContext(ctx, "tcp", address)
 	} else {
-		conn, err = net.Dial("tcp", address)
+		conn, err = dialer.DialContext(ctx, "tcp", address)
 	}
 	if err != nil {
 		return fmt.Errorf("[client.go]连接服务器失败:%w", err)
 	}
+
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		_ = conn.Close()
+		return errClientClosed
+	}
+	if c.conn != nil {
+		c.mu.Unlock()
+		_ = conn.Close()
+		return nil
+	}
 	c.gen++
 	gen := c.gen
 	c.conn = conn
+	c.mu.Unlock()
+
 	go c.readLoop(conn, gen)
 	return nil
 }
 
-// ensureConn 保证连接可用，断开则自动重连。替代原来的 sync.Once。
-func (c *RPCClient) ensureConn() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.closed {
-		return errors.New("[client.go]client 已关闭")
+// ensureConn 保证连接可用。只有第一个调用方负责 dial，其他调用方等待结果。
+func (c *RPCClient) ensureConn(ctx context.Context) error {
+	for {
+		c.mu.Lock()
+		if c.closed {
+			c.mu.Unlock()
+			return errClientClosed
+		}
+		if c.conn != nil {
+			c.mu.Unlock()
+			return nil
+		}
+		if c.dialing != nil {
+			ch := c.dialing
+			c.mu.Unlock()
+			select {
+			case <-ch:
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+
+		ch := make(chan struct{})
+		c.dialing = ch
+		dialCtx, cancel := context.WithTimeout(ctx, c.dialTimeout)
+		c.dialCancel = cancel
+		c.mu.Unlock()
+
+		err := c.dial(dialCtx)
+
+		c.mu.Lock()
+		c.dialing = nil
+		c.dialCancel = nil
+		close(ch)
+		c.mu.Unlock()
+		cancel()
+
+		if err != nil {
+			return err
+		}
+		// 回到循环确认连接仍然有效；Close 可能在 dial 期间发生。
 	}
-	if c.conn != nil {
-		return nil
-	}
-	return c.dial()
 }
 
 // triggerReconnect 关闭旧连接并把 conn 置空，下次 CallAsync 会重新 dial。
@@ -150,10 +228,38 @@ func (c *RPCClient) triggerReconnect() {
 	}
 }
 
+func (c *RPCClient) acquireSlot(ctx context.Context) error {
+	if c.slots == nil {
+		return nil
+	}
+	select {
+	case c.slots <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (c *RPCClient) releaseSlot() {
+	if c.slots == nil {
+		return
+	}
+	select {
+	case <-c.slots:
+	default:
+	}
+}
+
 // CallAsync 发起一次异步调用。返回 Future 用于获取结果。
 // 如果发送失败会立即返回 error（不返回 nil Future 让调用者盲等）。
 func (c *RPCClient) CallAsync(ctx context.Context, funcName string, body []byte) (*Future, error) {
-	if err := c.ensureConn(); err != nil {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := c.ensureConn(ctx); err != nil {
+		return nil, err
+	}
+	if err := c.acquireSlot(ctx); err != nil {
 		return nil, err
 	}
 
@@ -166,7 +272,8 @@ func (c *RPCClient) CallAsync(ctx context.Context, funcName string, body []byte)
 	c.mu.Lock()
 	if c.closed || c.conn == nil {
 		c.mu.Unlock()
-		return nil, errors.New("[client.go]client 已关闭")
+		c.releaseSlot()
+		return nil, errClientClosed
 	}
 	id := c.nextID
 	c.nextID++
@@ -177,12 +284,13 @@ func (c *RPCClient) CallAsync(ctx context.Context, funcName string, body []byte)
 	c.inflight.Add(1)
 	c.mu.Unlock()
 
-	// 清理函数：超时/取消时把 pending entry 删掉，避免 readLoop 后续向 nil channel 发送
+	// 清理函数：超时/取消时把 pending entry 删掉，并释放背压槽位。
 	cancel := func() {
 		c.mu.Lock()
 		if _, ok := c.pending[id]; ok {
 			delete(c.pending, id)
 			c.inflight.Add(-1)
+			c.releaseSlot()
 		}
 		c.mu.Unlock()
 	}
@@ -193,9 +301,19 @@ func (c *RPCClient) CallAsync(ctx context.Context, funcName string, body []byte)
 		Metadata: metadata,
 	}
 
-	// 串行化 Write，避免多 goroutine 并发 Write 导致 TCP 帧交错
+	// 串行化 Write，避免多 goroutine 并发 Write 导致 TCP 帧交错。
 	c.writeMu.Lock()
+	if c.writeTimeout > 0 {
+		deadline := time.Now().Add(c.writeTimeout)
+		if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+			deadline = d
+		}
+		_ = conn.SetWriteDeadline(deadline)
+	}
 	err := transport.SendToServer(id, conn, req)
+	if c.writeTimeout > 0 {
+		_ = conn.SetWriteDeadline(time.Time{})
+	}
 	c.writeMu.Unlock()
 	if err != nil {
 		// 发送失败：立即清理 pending，并触发重连
@@ -214,7 +332,12 @@ func (c *RPCClient) readLoop(conn net.Conn, gen uint64) {
 	for {
 		requestID, resp, err := c.readOneResponse(conn)
 		if err != nil {
-			log.Printf("[client.go]readLoop 退出:%v", err)
+			c.mu.Lock()
+			expectedClose := c.closed
+			c.mu.Unlock()
+			if !expectedClose {
+				log.Printf("[client.go]readLoop 退出:%v", err)
+			}
 			failErr := fmt.Errorf("[client.go]连接断开:%w", err)
 			c.failPendingGen(gen, failErr)
 			// 只在 c.conn 还是我这个旧 conn 时才清理；
@@ -234,6 +357,7 @@ func (c *RPCClient) readLoop(conn net.Conn, gen uint64) {
 			// 消费即删：避免后续向 nil channel 发送
 			delete(c.pending, requestID)
 			c.inflight.Add(-1)
+			c.releaseSlot()
 		}
 		c.mu.Unlock()
 
@@ -295,6 +419,7 @@ func (c *RPCClient) failPendingGen(gen uint64, err error) {
 		}
 		delete(c.pending, id)
 		c.inflight.Add(-1)
+		c.releaseSlot()
 	}
 }
 
@@ -309,5 +434,6 @@ func (c *RPCClient) failAllPending(err error) {
 		}
 		delete(c.pending, id)
 		c.inflight.Add(-1)
+		c.releaseSlot()
 	}
 }

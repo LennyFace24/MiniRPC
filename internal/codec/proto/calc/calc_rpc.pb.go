@@ -22,6 +22,10 @@ func NewCalculatorClientWithRegistry(reg registry.RegistryCenter) *CalculatorCli
 	return &CalculatorClient{pool: client.NewPoolWithRegistry(1, "Calculator", reg)}
 }
 
+func (c *CalculatorClient) Close() error {
+	return c.pool.Close()
+}
+
 func (c *CalculatorClient) Add(ctx context.Context, req *CalcReq) (*CalcRsp, error) {
 	body, err := proto.Marshal(req)
 	if err != nil {

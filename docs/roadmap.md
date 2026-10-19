@@ -68,7 +68,8 @@
 #### 7.2 客户端自动发现 ✅（基础隔离）
 - Pool 按 `serviceName` 调用 `Discover`，不再硬编码 `"Calculator"`
 - 每个 Pool 只持有同一服务的副本地址
-- 定时刷新 / 节点上下线感知待完善
+- 支持定时刷新、地址下线关闭旧连接、`Pool.Close`
+- 健康检查 / 故障摘除待完善
 
 ### Phase 8 — CLI 工具（可选）
 - 实现 `mini-rpc-cli` 命令行

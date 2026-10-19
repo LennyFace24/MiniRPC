@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"strings"
 	"sync"
+	"time"
 
 	"mini-rpc/pkg/registry"
 )
@@ -17,17 +18,22 @@ const (
 	RoundRobin = iota
 	LeastConnections
 	Random
+
+	defaultRefreshInterval = 5 * time.Second
 )
 
 type Pool struct {
-	reg         registry.RegistryCenter
-	serviceName string
-	addrs       []string
-	pools       map[string][]*RPCClient
-	size        int
-	addrIndex   int
-	connIndex   map[string]int // 每个地址独立的连接轮询下标
-	mu          sync.Mutex
+	reg             registry.RegistryCenter
+	serviceName     string
+	addrs           []string
+	pools           map[string][]*RPCClient
+	size            int
+	addrIndex       int
+	connIndex       map[string]int // 每个地址独立的连接轮询下标
+	refreshInterval time.Duration
+	done            chan struct{}
+	closed          bool
+	mu              sync.Mutex
 }
 
 func NewPool(size int, addr string) *Pool {
@@ -41,11 +47,12 @@ func NewPoolForService(size int, serviceName, addr string) *Pool {
 		size = 1
 	}
 	p := &Pool{
-		serviceName: serviceName,
-		addrs:       []string{addr},
-		pools:       make(map[string][]*RPCClient),
-		size:        size,
-		connIndex:   make(map[string]int),
+		serviceName:     serviceName,
+		addrs:           []string{addr},
+		pools:           make(map[string][]*RPCClient),
+		size:            size,
+		connIndex:       make(map[string]int),
+		refreshInterval: defaultRefreshInterval,
 	}
 	pools := make([]*RPCClient, size)
 	for i := range size {
@@ -56,7 +63,11 @@ func NewPoolForService(size int, serviceName, addr string) *Pool {
 }
 
 func NewPoolTLS(size int, addr string, tlsConfig *tls.Config) *Pool {
-	p := NewPool(size, addr)
+	return NewPoolTLSForService(size, "", addr, tlsConfig)
+}
+
+func NewPoolTLSForService(size int, serviceName, addr string, tlsConfig *tls.Config) *Pool {
+	p := NewPoolForService(size, serviceName, addr)
 	for _, conn := range p.pools[addr] {
 		conn.tlsConfig = tlsConfig
 	}
@@ -68,24 +79,37 @@ func NewPoolWithRegistry(size int, serviceName string, reg registry.RegistryCent
 		size = 1
 	}
 	p := &Pool{
-		reg:         reg,
-		serviceName: serviceName,
-		addrs:       make([]string, 0),
-		pools:       make(map[string][]*RPCClient),
-		size:        size,
-		connIndex:   make(map[string]int),
+		reg:             reg,
+		serviceName:     serviceName,
+		addrs:           make([]string, 0),
+		pools:           make(map[string][]*RPCClient),
+		size:            size,
+		connIndex:       make(map[string]int),
+		refreshInterval: defaultRefreshInterval,
+		done:            make(chan struct{}),
 	}
 	p.refresh()
+	if reg != nil && serviceName != "" {
+		go p.refreshLoop(p.done)
+	}
 	return p
 }
 
-func (p *Pool) refresh() {
-	if p.reg == nil {
-		log.Printf("[pool.go]registry 为 nil")
-		return
+func (p *Pool) refreshLoop(done <-chan struct{}) {
+	ticker := time.NewTicker(p.refreshInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			p.refresh()
+		case <-done:
+			return
+		}
 	}
-	if p.serviceName == "" {
-		log.Printf("[pool.go]serviceName 为空，跳过服务发现")
+}
+
+func (p *Pool) refresh() {
+	if p.reg == nil || p.serviceName == "" {
 		return
 	}
 
@@ -94,22 +118,30 @@ func (p *Pool) refresh() {
 		log.Printf("[pool.go]服务发现失败: %s", p.serviceName)
 		return
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
 
+	unique := make([]string, 0, len(addrs))
+	seen := make(map[string]bool, len(addrs))
+	for _, addr := range addrs {
+		if !seen[addr] {
+			seen[addr] = true
+			unique = append(unique, addr)
+		}
+	}
+
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return
+	}
 	if p.connIndex == nil {
 		p.connIndex = make(map[string]int)
 	}
 
-	newAddrs := make(map[string]bool)
-	for _, addr := range addrs {
+	newAddrs := make(map[string]bool, len(unique))
+	for _, addr := range unique {
 		newAddrs[addr] = true
 		if _, exists := p.pools[addr]; !exists {
-			n := p.size
-			if n <= 0 {
-				n = 1
-			}
-			conns := make([]*RPCClient, n)
+			conns := make([]*RPCClient, p.size)
 			for i := range conns {
 				conns[i] = NewRPCClientWithAddr(addr)
 			}
@@ -118,15 +150,51 @@ func (p *Pool) refresh() {
 		}
 	}
 
+	var removed []*RPCClient
 	for _, addr := range p.addrs {
 		if !newAddrs[addr] {
+			removed = append(removed, p.pools[addr]...)
 			delete(p.pools, addr)
 			delete(p.connIndex, addr)
 		}
 	}
+	p.addrs = unique
+	p.mu.Unlock()
 
-	p.addrs = addrs
-	log.Printf("[pool.go]发现服务%s地址:%v", p.serviceName, addrs)
+	for _, conn := range removed {
+		_ = conn.Close()
+	}
+	log.Printf("[pool.go]发现服务%s地址:%v", p.serviceName, unique)
+}
+
+// Close 停止刷新并关闭所有连接。可重复调用。
+func (p *Pool) Close() error {
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return nil
+	}
+	p.closed = true
+	if p.done != nil {
+		close(p.done)
+		p.done = nil
+	}
+
+	var all []*RPCClient
+	for _, conns := range p.pools {
+		all = append(all, conns...)
+	}
+	p.pools = make(map[string][]*RPCClient)
+	p.addrs = nil
+	p.mu.Unlock()
+
+	var firstErr error
+	for _, conn := range all {
+		if err := conn.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func (p *Pool) pickAddr(mode int) string {

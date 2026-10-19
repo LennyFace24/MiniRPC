@@ -20,17 +20,20 @@ func (r *StaticReg) Discover(serviceName string) ([]string, bool) {
 	var services map[string][]string
 	file, err := os.ReadFile("address.json")
 	if err != nil {
-		log.Fatalf("[cmd/client]读取配置文件失败:%v", err)
+		log.Printf("[cmd/client]读取配置文件失败:%v", err)
+		return nil, false
 	}
 	if err := json.Unmarshal(file, &services); err != nil {
-		log.Fatalf("[cmd/client]解析配置文件失败:%v", err)
+		log.Printf("[cmd/client]解析配置文件失败:%v", err)
+		return nil, false
 	}
 	addrs, ok := services[serviceName]
 	return addrs, ok
 }
 
 func main() {
-	client := calc.NewCalculatorClient("localhost:8080")
+	client := calc.NewCalculatorClientWithRegistry(&StaticReg{})
+	defer client.Close()
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Second*1))
 	defer cancel()
 	rsp, err := client.Add(ctx, &calc.CalcReq{A: 3, B: 5})

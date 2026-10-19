@@ -19,16 +19,26 @@ import (
 
 type contextKey string
 
-const traceIDKey contextKey = "trace-id"
+const (
+	traceIDKey          contextKey = "trace-id"
+	defaultReadTimeout             = 60 * time.Second
+	defaultWriteTimeout            = 10 * time.Second
+)
 
 func NewRPCServer() *RPCServer {
-	return &RPCServer{services: make(map[string]*types.ServiceDesc)}
+	return &RPCServer{
+		services:     make(map[string]*types.ServiceDesc),
+		readTimeout:  defaultReadTimeout,
+		writeTimeout: defaultWriteTimeout,
+	}
 }
 
 type RPCServer struct {
-	mu         sync.RWMutex
-	services   map[string]*types.ServiceDesc
-	middleware []middleware.Middleware
+	mu           sync.RWMutex
+	services     map[string]*types.ServiceDesc
+	middleware   []middleware.Middleware
+	readTimeout  time.Duration
+	writeTimeout time.Duration
 }
 
 func (s *RPCServer) RegisterService(serviceName string, rcvr interface{}) {
@@ -84,6 +94,9 @@ func (s *RPCServer) RegisterService(serviceName string, rcvr interface{}) {
 func (s *RPCServer) handleRequest(conn net.Conn) {
 	defer conn.Close()
 	for {
+		if s.readTimeout > 0 {
+			_ = conn.SetReadDeadline(time.Now().Add(s.readTimeout))
+		}
 		data, requestID, err := transport.ReadAndDeserialize(conn)
 		if err != nil {
 			if !strings.Contains(err.Error(), "EOF") && !strings.Contains(err.Error(), "closed") {
@@ -109,10 +122,13 @@ func (s *RPCServer) handleRequest(conn net.Conn) {
 
 			return s.executeHandler(ctx, data)
 		}()
+		if s.writeTimeout > 0 {
+			_ = conn.SetWriteDeadline(time.Now().Add(s.writeTimeout))
+		}
 		err = transport.SendToClient(requestID, conn, res)
 		if err != nil {
 			log.Printf("[server.go]发送响应数据错误:%v", err)
-			continue
+			return
 		}
 	}
 }

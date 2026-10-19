@@ -29,9 +29,12 @@
 ### 4.3 连接池 ✅
 - 管理复用多条 TCP 连接，轮询分配请求
 - 避免单连接瓶颈，提升吞吐
+- 支持 Close、定时刷新、地址下线关闭旧连接
+- 支持单连接 max in-flight 背压
 
 ### 4.4 超时控制 ✅
 - context deadline 通过 metadata 透传，服务端重建 ctx 并传给中间件 / handler；CallAsync 支持超时
+- 服务端 read / write timeout，客户端 write timeout
 
 ### 4.5 Protobuf 支持 ✅
 - 传输层直接使用 Protobuf MessageRequest / MessageResponse

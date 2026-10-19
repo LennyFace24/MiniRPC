@@ -65,6 +65,10 @@ func generateClient(g *protogen.GeneratedFile, svc *protogen.Service) {
 	g.P("	return &", clientName, "{pool: client.NewPoolWithRegistry(1, \"", serviceName, "\", reg)}")
 	g.P("}")
 	g.P()
+	g.P("func (c *", clientName, ") Close() error {")
+	g.P("	return c.pool.Close()")
+	g.P("}")
+	g.P()
 
 	for _, method := range svc.Methods {
 		inputType := method.Input.GoIdent

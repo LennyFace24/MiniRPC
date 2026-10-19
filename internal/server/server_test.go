@@ -322,6 +322,32 @@ func TestServer_ConcurrentRegisterAndUse(t *testing.T) {
 	}
 }
 
+// TestServer_ReadTimeout 验证空闲连接会被 read deadline 关闭。
+func TestServer_ReadTimeout(t *testing.T) {
+	srv := NewRPCServer()
+	srv.readTimeout = 50 * time.Millisecond
+	srv.RegisterService("Calc", &echoServer{})
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen失败: %v", err)
+	}
+	defer ln.Close()
+	go srv.Start(ln)
+
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatalf("Dial失败: %v", err)
+	}
+	defer conn.Close()
+
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 1)
+	if _, err := conn.Read(buf); err == nil {
+		t.Fatal("期望空闲连接被服务端关闭")
+	}
+}
+
 // TestServer_EndToEnd_TCP 用真实 TCP listener 验证完整端到端调用
 func TestServer_EndToEnd_TCP(t *testing.T) {
 	srv := NewRPCServer()

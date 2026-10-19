@@ -10,7 +10,9 @@ MiniRPC 提供客户端、服务端、连接池、异步调用、请求多路复
 - 支持请求多路复用和并发异步调用
 - 使用 Protocol Buffers 序列化请求与响应
 - 支持 `Future` 异步结果获取
-- 支持连接池
+- 支持连接池，支持 `Close`、定时刷新和地址下线关闭旧连接
+- 支持单连接 max in-flight 背压
+- 支持服务端 read / write timeout 与客户端 write timeout
 - 支持多种负载均衡策略：
   - Round Robin
   - Least Connections
@@ -358,7 +360,7 @@ client := client.NewRPCClientWithAddr("localhost:8080")
 }
 ```
 
-`Pool` 按 `serviceName` 隔离，地址列表只返回目标服务的副本。
+`Pool` 按 `serviceName` 隔离，地址列表只返回目标服务的副本。示例 `cmd/client` 通过 `NewCalculatorClientWithRegistry(&StaticReg{})` 从该文件发现地址。
 
 ## 服务注册与发现
 
