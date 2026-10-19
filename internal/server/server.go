@@ -73,18 +73,23 @@ func (s *RPCServer) handleRequest(conn net.Conn) {
 			return
 		}
 
-		ctx := context.Background()
 		// 用 transport.ParseDeadline 解析 metadata 中的 deadline（绝对时间，纳秒）
 		// 替代原来 key="timeout" 按 ms 解释的 buggy 实现
-		if deadline, ok := transport.ParseDeadline(data.Metadata); ok {
-			ctx, _ = context.WithDeadline(ctx, deadline)
-		}
-		if traceID, ok := data.Metadata["trace-id"]; ok {
-			ctx = context.WithValue(ctx, "trace-id", traceID)
-			log.Printf("[server.go]trace=%s 请求:%s", traceID, data.FuncName)
-		}
+		res := func() *framepb.MessageResponse {
+			ctx := context.Background()
+			var cancel context.CancelFunc = func() {}
+			if deadline, ok := transport.ParseDeadline(data.Metadata); ok {
+				ctx, cancel = context.WithDeadline(ctx, deadline)
+			}
+			defer cancel()
 
-		res := s.executeHandler(ctx, data)
+			if traceID, ok := data.Metadata["trace-id"]; ok {
+				ctx = context.WithValue(ctx, "trace-id", traceID)
+				log.Printf("[server.go]trace=%s 请求:%s", traceID, data.FuncName)
+			}
+
+			return s.executeHandler(ctx, data)
+		}()
 		err = transport.SendToClient(requestID, conn, res)
 		if err != nil {
 			log.Printf("[server.go]发送响应数据错误:%v", err)

@@ -5,6 +5,13 @@ import (
 	"fmt"
 )
 
+const (
+	// HeaderSize 是协议头固定长度。
+	HeaderSize = 15
+	// MaxFrameSize 是单个消息体的最大长度，防止恶意长度导致大内存分配。
+	MaxFrameSize = 4 << 20 // 4 MiB
+)
+
 // 协议头 (15B):
 // Magic:      1 byte  0xCC
 // Version:    1 byte  0x01
@@ -14,7 +21,7 @@ import (
 // Total:      15 byte
 
 func AddHeadersBeforeBytes(id uint64, b *[]byte) {
-	var header [15]byte
+	var header [HeaderSize]byte
 	header[0] = 0xCC                                           // Magic
 	header[1] = 0x01                                           // Version
 	header[2] = 0x01                                           // MessageType
@@ -29,11 +36,11 @@ func ReadMsg(data []byte) ([]byte, uint64, error) {
 		return nil, 0, err
 	}
 	requestID := binary.BigEndian.Uint64(data[3:11])
-	return data[15:], requestID, nil
+	return data[HeaderSize:], requestID, nil
 }
 
 func CheckProtocolHeader(data []byte) (bool, error) {
-	if len(data) < 15 {
+	if len(data) < HeaderSize {
 		return false, fmt.Errorf("[protocol.go] 数组长度不足，说明连协议头都未携带")
 	}
 	if (data[0] != 0xCC) || (data[1] != 0x01) || (data[2] != 0x01) {

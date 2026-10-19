@@ -37,7 +37,8 @@ func (r *StaticReg) Discover(serviceName string) ([]string, bool) {
 
 func main() {
 	client := calc.NewCalculatorClient("localhost:8080")
-	ctx, _ := context.WithDeadline(context.Background(), time.Now().Add(time.Second*1))
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Second*1))
+	defer cancel()
 	rsp, err := client.Add(ctx, &calc.CalcReq{A: 3, B: 5})
 	if err != nil {
 		log.Fatalf("[cmd/client]调用失败:%v", err)

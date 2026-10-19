@@ -26,14 +26,15 @@
 - 持久 conn，readLoop 后台分发
 - RequestID 匹配请求和响应
 
-### 4.3 连接池 ⏳
+### 4.3 连接池 ✅
 - 管理复用多条 TCP 连接，轮询分配请求
 - 避免单连接瓶颈，提升吞吐
 
-### 4.4 超时控制
-- context.Context 透传，CallAsync 支持超时
+### 4.4 超时控制 ✅
+- context deadline 通过 metadata 透传，服务端调用前校验；CallAsync 支持超时
 
-### 4.5 Protobuf 支持
-- codec 抽成接口，增加 protobuf 实现
+### 4.5 Protobuf 支持 ✅
+- 传输层直接使用 Protobuf MessageRequest / MessageResponse
 
-### 4.6 服务发现存根
+### 4.6 服务发现存根 ✅
+- RegistryCenter 接口 + 静态地址示例

@@ -39,20 +39,22 @@
 - 生成 Server 接口 + Wrapper + RegisterCalculatorServer
 - 负载均衡生效（RoundRobin 策略）
 
-#### 5.3 Context 透传
-- client 端提取 deadline/traceID → 塞进 MessageRequest.Metadata
-- server 端重建 ctx → 超时检查
+#### 5.3 Context deadline 透传
+- client 端提取 deadline → 塞进 MessageRequest.Metadata
+- server 端重建 ctx → 调用前超时检查
+- handler 内部完整 ctx 透传待完善
 
-## 待完成阶段
+## 进行中 / 待完成阶段
 
-### Phase 6 — TLS / 加密
+### Phase 6 — TLS / 加密 ✅（基础实现）
 
-#### 6.1 TLS 支持
-- server 支持 `ServeTLS(cert, key)` 方法
-- client 支持 `DialTLS(addr, cert)` 或 `pool.NewTLS(size, addr, tlsConfig)`
-- transport 层改为 `net.Conn` 或 `tls.Conn` 均可
+#### 6.1 TLS 支持 ✅
+- server 支持 `ServeTLS(addr, certFile, keyFile)` 方法
+- client 支持 `tls.Dial` / `pool.NewPoolTLS`
+- transport 层使用 `net.Conn`，TLS 时传入 `tls.Conn`
+- 已补 TLS 端到端测试；mTLS / 证书轮换待完善
 
-#### 6.2 可选的加密传输
+#### 6.2 可选的加密传输 ✅
 - 非 TLS 时走明文
 - 用户传入 `tls.Config` 时才走 TLS
 

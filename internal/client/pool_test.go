@@ -72,6 +72,31 @@ func TestRoundRobin_Distribution(t *testing.T) {
 	}
 }
 
+// TestRoundRobin_CallSequenceDistribution 验证 pickAddr + pickConn 的调用序列
+// 仍然能均匀使用所有连接。地址选择和连接选择必须使用独立计数器。
+func TestRoundRobin_CallSequenceDistribution(t *testing.T) {
+	pool := NewPool(4, "localhost:8080")
+	counts := make(map[*RPCClient]int)
+
+	for range 8 {
+		addr := pool.pickAddr(RoundRobin)
+		conn := pool.pickConn(addr, RoundRobin)
+		if conn == nil {
+			t.Fatal("pickConn 返回 nil")
+		}
+		counts[conn]++
+	}
+
+	if len(counts) != 4 {
+		t.Fatalf("期望4个不同连接, 得到%d", len(counts))
+	}
+	for conn, n := range counts {
+		if n != 2 {
+			t.Fatalf("连接%p: 期望2次, 得到%d次", conn, n)
+		}
+	}
+}
+
 // TestRandom_Distribution 验证 Random 的统计均匀性
 func TestRandom_Distribution(t *testing.T) {
 	pool := NewPool(5, "localhost:8080")
@@ -98,9 +123,9 @@ func TestLeastConnections_SelectsLeastBusy(t *testing.T) {
 	pool := NewPool(3, "localhost:8080")
 	conns := pool.pools["localhost:8080"]
 
-	conns[0].pending[1] = make(chan *RPCResult, 1)
-	conns[0].pending[2] = make(chan *RPCResult, 1)
-	conns[1].pending[3] = make(chan *RPCResult, 1)
+	conns[0].inflight.Store(2)
+	conns[1].inflight.Store(1)
+	// conns[2] 保持 0，应被选中
 
 	selected := pool.pickConn("localhost:8080", LeastConnections)
 	if selected != conns[2] {
@@ -120,7 +145,7 @@ func TestPool_MultiAddrDistribution(t *testing.T) {
 	}
 
 	counts := make(map[string]int)
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		addr := pool.pickAddr(RoundRobin)
 		counts[addr]++
 	}
@@ -148,6 +173,28 @@ func TestNewPoolSize(t *testing.T) {
 	pool := NewPool(2, "localhost:443")
 	if len(pool.pools["localhost:443"]) != 2 {
 		t.Fatalf("期望2个连接, 得到%d", len(pool.pools["localhost:443"]))
+	}
+}
+
+type staticRegistry struct {
+	addrs []string
+}
+
+func (r *staticRegistry) Register(string, string) {}
+
+func (r *staticRegistry) Discover(string) ([]string, bool) {
+	return r.addrs, true
+}
+
+// TestNewPoolWithRegistrySize 验证注册中心路径也按 size 创建连接。
+func TestNewPoolWithRegistrySize(t *testing.T) {
+	reg := &staticRegistry{addrs: []string{"A:8080", "B:8080"}}
+	pool := NewPoolWithRegistry(3, reg)
+
+	for _, addr := range reg.addrs {
+		if got := len(pool.pools[addr]); got != 3 {
+			t.Fatalf("地址%s的连接数: 期望3, 得到%d", addr, got)
+		}
 	}
 }
 

@@ -22,14 +22,21 @@ type Pool struct {
 	reg       registry.RegistryCenter
 	addrs     []string
 	pools     map[string][]*RPCClient
+	size      int
 	addrIndex int
+	connIndex map[string]int // 每个地址独立的连接轮询下标
 	mu        sync.Mutex
 }
 
 func NewPool(size int, addr string) *Pool {
+	if size <= 0 {
+		size = 1
+	}
 	p := &Pool{
-		addrs: []string{addr},
-		pools: make(map[string][]*RPCClient),
+		addrs:     []string{addr},
+		pools:     make(map[string][]*RPCClient),
+		size:      size,
+		connIndex: make(map[string]int),
 	}
 	pools := make([]*RPCClient, size)
 	for i := range size {
@@ -48,10 +55,15 @@ func NewPoolTLS(size int, addr string, tlsConfig *tls.Config) *Pool {
 }
 
 func NewPoolWithRegistry(size int, reg registry.RegistryCenter) *Pool {
+	if size <= 0 {
+		size = 1
+	}
 	p := &Pool{
-		reg:   reg,
-		addrs: make([]string, 0),
-		pools: make(map[string][]*RPCClient),
+		reg:       reg,
+		addrs:     make([]string, 0),
+		pools:     make(map[string][]*RPCClient),
+		size:      size,
+		connIndex: make(map[string]int),
 	}
 	p.refresh()
 	return p
@@ -66,22 +78,31 @@ func (p *Pool) refresh() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	old := make(map[string]bool)
-	for _, addr := range p.addrs {
-		old[addr] = true
+	if p.connIndex == nil {
+		p.connIndex = make(map[string]int)
 	}
 
 	newAddrs := make(map[string]bool)
 	for _, addr := range addrs {
 		newAddrs[addr] = true
 		if _, exists := p.pools[addr]; !exists {
-			p.pools[addr] = []*RPCClient{NewRPCClientWithAddr(addr)}
+			n := p.size
+			if n <= 0 {
+				n = 1
+			}
+			conns := make([]*RPCClient, n)
+			for i := range conns {
+				conns[i] = NewRPCClientWithAddr(addr)
+			}
+			p.pools[addr] = conns
+			p.connIndex[addr] = 0
 		}
 	}
 
 	for _, addr := range p.addrs {
 		if !newAddrs[addr] {
 			delete(p.pools, addr)
+			delete(p.connIndex, addr)
 		}
 	}
 
@@ -104,11 +125,11 @@ func (p *Pool) pickAddr(mode int) string {
 		return addr
 	case LeastConnections:
 		minAddr := p.addrs[0]
-		minCount := -1
+		var minCount int64 = -1
 		for _, addr := range p.addrs {
-			total := 0
+			var total int64
 			for _, conn := range p.pools[addr] {
-				total += len(conn.pending)
+				total += conn.inflight.Load()
 			}
 			if minCount == -1 || total < minCount {
 				minCount = total
@@ -133,13 +154,17 @@ func (p *Pool) pickConn(addr string, mode int) *RPCClient {
 
 	switch mode {
 	case RoundRobin:
-		conn := conns[p.addrIndex%len(conns)]
-		p.addrIndex++
+		if p.connIndex == nil {
+			p.connIndex = make(map[string]int)
+		}
+		idx := p.connIndex[addr]
+		conn := conns[idx%len(conns)]
+		p.connIndex[addr] = idx + 1
 		return conn
 	case LeastConnections:
 		min := conns[0]
 		for _, conn := range conns[1:] {
-			if len(conn.pending) < len(min.pending) {
+			if conn.inflight.Load() < min.inflight.Load() {
 				min = conn
 			}
 		}

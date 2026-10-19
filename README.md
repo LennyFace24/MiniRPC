@@ -444,7 +444,6 @@ rsp, err := client.Add(ctx, req)
 - 尚未内置 etcd 或 Consul 实现。
 - CLI 调用工具仍处于规划阶段。
 - 生成代码中的部分内部包路径更适合在当前模块中使用。
-- 项目当前未声明开源许可证。
 
 更多开发阶段和后续规划请参考：
 
@@ -456,7 +455,7 @@ rsp, err := client.Add(ctx, req)
 
 计划中的功能包括：
 
-- 完善 TLS 客户端配置
+- 补充 TLS 集成测试与 mTLS 支持
 - 接入 etcd / Consul 服务发现
 - 支持动态节点刷新
 - 开发类似 `grpcurl` 的 CLI 工具

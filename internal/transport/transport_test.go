@@ -8,8 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	framepb "mini-rpc/internal/codec/proto/framepb"
 	"google.golang.org/protobuf/proto"
+	framepb "mini-rpc/internal/codec/proto/framepb"
+	"mini-rpc/internal/protocol"
 )
 
 // readFrame 低层读 15B 协议头 + body，返回 (requestID, body, error)
@@ -147,6 +148,26 @@ func TestReadAndDeserialize_ConnectionClosed(t *testing.T) {
 	_, _, err := ReadAndDeserialize(serverConn)
 	if err == nil {
 		t.Fatal("期望连接关闭错误, 但未返回")
+	}
+}
+
+// TestReadAndDeserialize_FrameTooLarge 验证超大 BodyLen 在分配内存前被拒绝。
+func TestReadAndDeserialize_FrameTooLarge(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	go func() {
+		header := make([]byte, protocol.HeaderSize)
+		header[0] = 0xCC
+		header[1] = 0x01
+		header[2] = 0x01
+		binary.BigEndian.PutUint32(header[11:15], protocol.MaxFrameSize+1)
+		_, _ = clientConn.Write(header)
+	}()
+
+	if _, _, err := ReadAndDeserialize(serverConn); err == nil {
+		t.Fatal("期望消息体过大错误")
 	}
 }
 

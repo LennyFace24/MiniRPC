@@ -52,6 +52,9 @@ func ReadAndDeserialize(conn net.Conn) (*framepb.MessageRequest, uint64, error) 
 		return nil, 0, fmt.Errorf("[transport.go]协议头校验失败")
 	}
 	bodyLength := binary.BigEndian.Uint32(header[11:15])
+	if bodyLength > protocol.MaxFrameSize {
+		return nil, 0, fmt.Errorf("[transport.go]消息体过大:%d", bodyLength)
+	}
 	totalLen := 15 + bodyLength
 	msg := make([]byte, totalLen)
 	copy(msg, header)
