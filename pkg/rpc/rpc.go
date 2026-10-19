@@ -10,8 +10,8 @@ func NewServer() *server.RPCServer {
 	return server.NewRPCServer()
 }
 
-func NewClient() *client.RPCClient {
-	return client.NewRPCClient()
+func NewClient(addr string) *client.RPCClient {
+	return client.NewRPCClientWithAddr(addr)
 }
 
 func NewPool(size int, addr string) *client.Pool {

@@ -31,7 +31,6 @@ MiniRPC 提供客户端、服务端、连接池、异步调用、请求多路复
 - TCP
 - Protocol Buffers
 - `google.golang.org/protobuf`
-- `gopkg.in/yaml.v2`
 
 ## 项目结构
 
@@ -44,16 +43,14 @@ MiniRPC 提供客户端、服务端、连接池、异步调用、请求多路复
 ├── internal/
 │   ├── client/              # RPC 客户端、Future、连接池和负载均衡
 │   ├── codec/proto/         # Protobuf 定义和生成代码
-│   ├── config/              # YAML 配置加载
 │   ├── middleware/          # 日志、异常恢复等中间件
 │   ├── protocol/            # RPC 协议头定义
 │   ├── server/              # RPC 服务注册和请求处理
 │   ├── transport/            # TCP 数据读写和 Protobuf 编解码
 │   └── types/               # 服务和方法描述
 ├── pkg/
-│   ├── registry/             # 服务注册与发现接口
+│   ├── registry/             # 服务发现接口 + FileRegistry
 │   └── rpc/                  # 对外暴露的 RPC 创建入口
-├── config.yaml              # 默认服务端配置
 ├── address.json             # 按服务分组的示例地址列表
 ├── docs/                    # 开发规划和设计文档
 ├── go.mod
@@ -97,7 +94,7 @@ go mod download
 go run ./cmd/server
 ```
 
-服务端默认监听 `:8080`，并注册 `Calculator` 服务。
+服务端默认监听 `:8080`，并注册 `Calculator` 服务；可以用 `-addr` 覆盖监听地址。
 
 ### 启动客户端
 
@@ -334,23 +331,27 @@ protoc \
 3. Future 结果等待
 4. Protobuf 响应反序列化
 
-## 配置
+## 地址与配置
 
-如果客户端没有显式指定地址，MiniRPC 会读取根目录下的 `config.yaml`：
+MiniRPC 不读取隐式配置文件。地址来源二选一：
 
-```yaml
-server:
-  url: "localhost"
-  port: 8080
-```
-
-客户端也可以直接指定地址：
+1. 显式地址：
 
 ```go
-client := client.NewRPCClientWithAddr("localhost:8080")
+client := calc.NewCalculatorClient("localhost:8080")
+// 或者
+client := rpc.NewClient("localhost:8080")
 ```
 
-示例服务地址列表位于 `address.json`：
+2. `RegistryCenter`：
+
+```go
+reg := registry.NewFileRegistry("address.json")
+client := calc.NewCalculatorClientWithRegistry(reg)
+defer client.Close()
+```
+
+示例服务地址文件 `address.json`：
 
 ```json
 {
@@ -360,7 +361,7 @@ client := client.NewRPCClientWithAddr("localhost:8080")
 }
 ```
 
-`Pool` 按 `serviceName` 隔离，地址列表只返回目标服务的副本。示例 `cmd/client` 通过 `NewCalculatorClientWithRegistry(&StaticReg{})` 从该文件发现地址。
+`Pool` 按 `serviceName` 隔离，地址列表只返回目标服务的副本。示例 `cmd/client` 使用 `registry.NewFileRegistry("address.json")`。
 
 ## 服务注册与发现
 
@@ -373,13 +374,15 @@ type RegistryCenter interface {
 }
 ```
 
-使用自定义注册中心创建连接池：
+内置的 `FileRegistry` 读取 JSON 文件：
 
 ```go
-pool := rpc.NewPoolWithRegistry(1, "Calculator", registry)
+reg := registry.NewFileRegistry("address.json")
+pool := rpc.NewPoolWithRegistry(1, "Calculator", reg)
+defer pool.Close()
 ```
 
-当前仓库主要提供接口和静态地址示例，后续可以接入 etcd、Consul 等服务发现组件。
+也可以实现自己的 `RegistryCenter`，接入 etcd、Consul 或配置中心。`FileRegistry` 每次 `Discover` 都会重新读取文件，配合 Pool 的定时刷新即可感知地址变化。
 
 ## 中间件
 
@@ -452,8 +455,8 @@ rsp, err := client.Add(ctx, req)
 
 ## 当前限制
 
-- 服务发现目前只有抽象接口和静态地址示例。
-- 尚未内置 etcd 或 Consul 实现。
+- 内置 `FileRegistry`（JSON 静态文件），尚未内置 etcd / Consul。
+- 服务发现没有健康检查和故障摘除。
 - CLI 调用工具仍处于规划阶段。
 - 生成代码中的部分内部包路径更适合在当前模块中使用。
 
@@ -469,10 +472,10 @@ rsp, err := client.Add(ctx, req)
 
 - 补充 TLS 集成测试与 mTLS 支持
 - 接入 etcd / Consul 服务发现
-- 支持动态节点刷新
+- 支持健康检查与故障摘除
 - 开发类似 `grpcurl` 的 CLI 工具
 - 支持更多传输和调用配置
-- 完善跨模块 Context 透传
+- 支持 read / write / idle timeout 配置化
 
 ## License
 MIT

@@ -9,13 +9,11 @@ import (
 	"io"
 	"log"
 	"net"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	framepb "mini-rpc/internal/codec/proto/framepb"
-	"mini-rpc/internal/config"
 	"mini-rpc/internal/protocol"
 	"mini-rpc/internal/transport"
 
@@ -40,7 +38,7 @@ type pendingCall struct {
 
 // RPCClient 是一个长连接的 RPC 客户端，支持多路复用和自动重连。
 type RPCClient struct {
-	addr         string // 显式地址；为空时回退到 config.yaml
+	addr         string // 显式地址；为空时 CallAsync 返回错误
 	tlsConfig    *tls.Config
 	dialTimeout  time.Duration
 	writeTimeout time.Duration
@@ -82,6 +80,8 @@ func (f *Future) Get(ctx context.Context) ([]byte, error) {
 	}
 }
 
+// NewRPCClient 创建一个未配置地址的客户端。
+// 正常发起调用请使用 NewRPCClientWithAddr，或通过 Pool 注入地址。
 func NewRPCClient() *RPCClient {
 	return &RPCClient{
 		nextID:       1,
@@ -92,7 +92,7 @@ func NewRPCClient() *RPCClient {
 	}
 }
 
-// NewRPCClientWithAddr 创建一个指定服务器地址的客户端，不依赖 config.yaml。
+// NewRPCClientWithAddr 创建一个指定服务器地址的客户端。
 func NewRPCClientWithAddr(addr string) *RPCClient {
 	c := NewRPCClient()
 	c.addr = addr
@@ -121,14 +121,10 @@ func (c *RPCClient) Close() error {
 }
 
 func (c *RPCClient) address() (string, error) {
-	if c.addr != "" {
-		return c.addr, nil
+	if c.addr == "" {
+		return "", errors.New("[client.go]未配置服务器地址")
 	}
-	cfg := config.LoadConfig()
-	if cfg == nil {
-		return "", errors.New("[client.go]加载配置文件失败")
-	}
-	return net.JoinHostPort(cfg.Server.URL, strconv.Itoa(cfg.Server.Port)), nil
+	return c.addr, nil
 }
 
 // dial 建立新连接并启动 readLoop。调用方不能持有 c.mu，且同一时刻只能有一个 dial。
