@@ -322,7 +322,7 @@ protoc \
 - Server Wrapper
 - `Register<Service>Server` 注册函数
 
-生成的客户端会绑定 serviceName，Pool 只会在该服务的副本地址之间做负载均衡；同时生成 `New<Service>ClientWithRegistry`，可直接接入注册中心。
+生成的客户端会绑定 serviceName，Pool 只会在该服务的副本地址之间做负载均衡；同时生成 `New<Service>ClientWithRegistry`，可直接接入注册中心。生成代码只依赖 `pkg/rpc` 和 `pkg/registry`，不再直接引用 internal 包。
 
 生成的客户端调用会自动完成：
 

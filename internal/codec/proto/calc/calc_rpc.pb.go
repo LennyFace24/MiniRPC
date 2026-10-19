@@ -5,21 +5,20 @@ package calc
 import (
 	"context"
 	"google.golang.org/protobuf/proto"
-	"mini-rpc/internal/client"
-	"mini-rpc/internal/server"
 	"mini-rpc/pkg/registry"
+	"mini-rpc/pkg/rpc"
 )
 
 type CalculatorClient struct {
-	pool *client.Pool
+	pool *rpc.Pool
 }
 
 func NewCalculatorClient(addr string) *CalculatorClient {
-	return &CalculatorClient{pool: client.NewPoolForService(1, "Calculator", addr)}
+	return &CalculatorClient{pool: rpc.NewPoolForService(1, "Calculator", addr)}
 }
 
 func NewCalculatorClientWithRegistry(reg registry.RegistryCenter) *CalculatorClient {
-	return &CalculatorClient{pool: client.NewPoolWithRegistry(1, "Calculator", reg)}
+	return &CalculatorClient{pool: rpc.NewPoolWithRegistry(1, "Calculator", reg)}
 }
 
 func (c *CalculatorClient) Close() error {
@@ -31,7 +30,7 @@ func (c *CalculatorClient) Add(ctx context.Context, req *CalcReq) (*CalcRsp, err
 	if err != nil {
 		return nil, err
 	}
-	future, err := c.pool.CallAsync(ctx, "Calculator.Add", client.RoundRobin, body)
+	future, err := c.pool.CallAsync(ctx, "Calculator.Add", rpc.RoundRobin, body)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +67,7 @@ func (w *CalculatorServerWrapper) Add(ctx context.Context, body []byte) ([]byte,
 	return proto.Marshal(rsp)
 }
 
-func RegisterCalculatorServer(s *server.RPCServer, srv CalculatorServer) {
+func RegisterCalculatorServer(s *rpc.Server, srv CalculatorServer) {
 	wrapper := &CalculatorServerWrapper{Srv: srv}
 	s.RegisterService("Calculator", wrapper)
 }
